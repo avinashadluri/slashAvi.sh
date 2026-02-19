@@ -3,8 +3,8 @@
   "theme": "palm",
   "name": "helloavi",
   "logo": {
-    "light": "/images/logo2.png",
-    "dark": "/images/logo2.png"
+    "light": "/images/lg1.png",
+    "dark": "/images/lg1.png"
   },
   "tagline": "Build. Think. Write.",
   "colors": {
@@ -28,7 +28,7 @@
           },
           {
             "group": "About Me",
-            "pages": ["about/professional", "about/personal"]
+            "pages": ["about/professional", "about/personal", "now"]
           },
           {
             "group": "Social",
@@ -185,7 +185,7 @@
         "groups": [
           {
             "group": "Playbooks",
-            "pages": ["thinkish/intro", "thinkish/action-plan"]
+            "pages": ["thinkish/intro", "thinkish/frameworks", "thinkish/action-plan"]
           }
         ]
       },
