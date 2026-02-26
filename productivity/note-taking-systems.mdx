@@ -1,0 +1,276 @@
+---
+title: "Note-Taking Systems for Technical People"
+description: "An honest comparison of note-taking systems I've used — Notion, Obsidian, Heptabase, Apple Notes — and what actually stuck."
+---
+
+# Note-Taking Systems for Technical People
+
+I've spent an embarrassing number of hours configuring, migrating, and agonizing over note-taking tools. Notion to Obsidian. Obsidian to Logseq. Logseq back to Notion. A brief fling with Roam Research. A longer relationship with Heptabase. And through all of it, the most consistently useful tool has been the one that came free with my phone.
+
+This isn't a "best note-taking app" listicle. This is an honest account of what works and what doesn't when you're an engineer who needs to capture technical decisions, learning, meeting context, and the occasional shower thought — while also doing actual work.
+
+The conclusion I've reached after years of experimentation: no single tool wins. But the wrong combination will cost you more time than it saves.
+
+---
+
+## What Engineers Actually Need to Capture
+
+Before comparing tools, let's clarify what we're storing. Engineers have specific capture needs that differ from writers, students, or general knowledge workers.
+
+### The Five Types of Engineering Knowledge
+
+**1. Decisions and their reasoning**
+Why did we choose PostgreSQL over DynamoDB? Why is the auth service a separate deployment? These decisions decay fast in memory but stay valuable for years. This is the "institutional memory" that most teams lose when people leave.
+
+**2. Patterns and anti-patterns**
+"Every time we use library X for Y, we hit Z problem." "This retry pattern works well for idempotent operations." These are the distilled lessons from experience that make senior engineers senior.
+
+**3. Meeting and conversation context**
+Not transcripts — context. What was decided? What's still open? Who committed to what? The signal extracted from the noise of a 45-minute meeting.
+
+**4. Learning and exploration**
+Conference notes, course highlights, paper summaries, tutorial walkthroughs. The raw material that becomes expertise over time.
+
+**5. Quick thoughts and fleeting ideas**
+"What if we used server-sent events instead of polling?" "That error message from Tuesday might be related to the memory leak." Half-formed ideas that need to be captured before they vanish.
+
+Each of these has different requirements for speed, structure, searchability, and longevity. That's why a single tool rarely works.
+
+---
+
+## Notion: The Organizational Backbone
+
+**Used since:** 2019
+**Current role:** Structured knowledge, project management, meeting notes, dashboards
+
+### What Notion Does Well
+
+Notion is unmatched for **structured data**. Databases with properties, views, filters, and relations let you build genuinely powerful knowledge systems. My PARA setup lives in Notion because the database structure maps perfectly to projects, areas, resources, and archives.
+
+- **Meeting notes** — a database with date, attendees, project tag, decisions, and action items. I can filter by project and instantly see every decision made in the last quarter.
+- **Project dashboards** — linked databases pulling from tasks, notes, and decision logs. One page gives me the full picture.
+- **Templates** — meeting template, ADR template, weekly review template, 1:1 template. Reducing the friction of capture is everything.
+- **Team sharing** — Notion's collaboration features mean my engineering notes can become team resources without migration.
+
+### Where Notion Falls Short
+
+**Speed.** Notion's Electron app takes 2-3 seconds to open. Its mobile app is slower. When you have a fleeting thought while walking the kids to school, 3 seconds is an eternity. By the time Notion loads, the thought is gone.
+
+**Offline support.** It's gotten better, but Notion still feels like a web app pretending to be native. On a plane or in a dead zone, it's unreliable.
+
+**Thinking tool vs. storage tool.** Notion is great for organizing knowledge you already have. It's mediocre for _developing_ ideas. Writing in Notion feels like filing. Writing in a canvas or a simple editor feels like thinking.
+
+<Tip>
+Use Notion as your system of record, not your system of thought. Capture ideas elsewhere, then file them in Notion during your weekly review.
+</Tip>
+
+### My Notion Setup
+
+| Database | Purpose | Key Properties |
+|---|---|---|
+| Projects | Active work with deadlines | Status, Area, Sprint, Priority |
+| Meeting Notes | All meeting context | Date, Attendees, Project, Decisions |
+| Decision Log | ADRs and key decisions | Date, Project, Status, Consequences |
+| Learning | Courses, talks, articles | Source, Topic, Progressive Summary Level |
+| Weekly Reviews | Cycle accountability | Week #, Scores, Wins, Blockers |
+
+---
+
+## Obsidian: Powerful but High Friction
+
+**Used:** 2021-2022 (about 14 months)
+**Current role:** Archived. Migrated to Heptabase for thinking, Notion for structure.
+
+### What Obsidian Does Well
+
+Obsidian's core promise is compelling: local-first markdown files, bidirectional links, and a plugin ecosystem that can turn it into anything. The graph view is mesmerizing — watching your knowledge network grow feels like watching your brain externalize itself.
+
+- **Local files** — your notes are just `.md` files. No vendor lock-in. No server dependency. This matters for engineers who think about data ownership.
+- **Bidirectional linking** — connecting notes with `[[wikilinks]]` builds a knowledge graph organically. The connections surface insights you wouldn't find through folder hierarchies.
+- **Plugin ecosystem** — Dataview for database-like queries, Templater for automation, Calendar for daily notes. You can build almost anything.
+- **Speed** — Obsidian is fast. Blazingly fast compared to Notion. Opening a note is instant.
+
+### Why I Stopped Using It
+
+**Setup cost.** Obsidian out of the box is a markdown editor. To get it to the level of a real knowledge system, you need to install plugins, configure templates, set up folder structures, customize CSS, and build workflows. I spent more time configuring Obsidian than writing in it.
+
+**The plugin trap.** There's always a better plugin, a smarter workflow, a more elegant template. For engineers, this is catnip. I'd spend my Saturday morning deep work block optimizing my Obsidian setup instead of working on actual projects. The tool became the project.
+
+**Sync friction.** Obsidian Sync works, but it's a paid add-on. iCloud sync is unreliable for the `.obsidian` config folder. Git-based sync is possible but janky on mobile. For a tool I need across Mac, iPhone, and iPad, the sync story was frustrating.
+
+**Loneliness.** Obsidian is a single-player tool. Sharing a note with a colleague means exporting to markdown or PDF. In a team context, this is a significant limitation compared to Notion's native sharing.
+
+<Warning>
+If you're considering Obsidian, be honest with yourself: are you excited about the note-taking, or the tinkering? If it's the tinkering, Obsidian will eat your productivity while feeling productive. It's the engineering equivalent of yak shaving.
+</Warning>
+
+---
+
+## Heptabase: Visual Thinking for Learning
+
+**Used since:** 2023
+**Current role:** Learning, concept mapping, research, visual thinking
+
+### What Heptabase Does Well
+
+Heptabase is the tool I didn't know I needed. It's built around **visual canvases** — infinite whiteboards where you can place note cards, draw connections, and build spatial maps of ideas.
+
+For learning new technologies or understanding complex systems, this is transformative. When I was studying the architecture behind LangChain's agent framework, I laid out each component on a canvas — the planner, the tool executor, the memory module — and drew the data flow between them. That spatial map gave me an understanding in 2 hours that linear notes wouldn't have produced in a week.
+
+- **Spatial thinking** — ideas have positions and relationships. Moving cards around is a form of thinking.
+- **Progressive deepening** — you can zoom into a card and it becomes its own canvas. Fractal knowledge organization.
+- **Journal integration** — daily journal entries that can be dragged onto canvases. Fleeting thoughts become part of structured maps.
+- **Clean, focused UI** — no plugin ecosystem to fall into. Heptabase is opinionated about its workflow, and that's a feature.
+
+### Where Heptabase Has Limits
+
+**Not great for structured data.** You can't build a database with filters and views like Notion. It's a thinking tool, not an organizational tool.
+
+**Small community.** Compared to Obsidian or Notion, the community and ecosystem are tiny. Fewer templates, fewer integrations, fewer YouTube tutorials.
+
+**Price.** It's a paid tool with no free tier. For what it does, I think it's worth it. But it's a harder sell when free alternatives exist for simpler use cases.
+
+**Mobile experience.** The mobile app exists but isn't where the magic happens. Heptabase is a desktop-first, large-screen experience.
+
+---
+
+## Apple Notes: Speed Wins
+
+**Used since:** Always
+**Current role:** Quick capture, fleeting thoughts, grocery lists, anything that needs to exist in under 5 seconds
+
+### Why Apple Notes Keeps Winning
+
+Apple Notes violates every principle of "serious" knowledge management. No bidirectional links. No graph view. No databases. No plugins. No API.
+
+And yet it's the tool I use most frequently, because it has the one quality that matters more than any feature: **it's fast**.
+
+From locked screen to typing: about 1.5 seconds. Swipe down on iPhone, tap Notes, start writing. The thought is captured before my brain has time to evaluate whether it's "worth" capturing.
+
+This speed advantage is not trivial. The gap between having a thought and capturing it is where most knowledge is lost. Every second of friction in that gap is a filter that kills good ideas.
+
+### What Lives in Apple Notes
+
+- Shower thoughts and walking ideas
+- Quick todos that don't belong in Linear
+- Phone numbers, addresses, temporary info
+- Draft messages I want to think about before sending
+- Packing lists, grocery lists, gift ideas
+- Screenshots of error messages I want to investigate later
+
+### The Rule
+
+Apple Notes is a capture inbox, not a storage system. During my [weekly review](/productivity/second-brain), I triage everything in Apple Notes: move actionable items to Notion, interesting ideas to Heptabase, and delete the rest. Apple Notes should be empty (or near-empty) after every Sunday review.
+
+---
+
+## The "Capture Tax" Problem
+
+Here's the real issue with note-taking systems: every tool you add is a decision you have to make. "Should I put this in Notion or Heptabase?" "Is this a quick note or a proper entry?" "Which template do I use?"
+
+I call this the **capture tax** — the cognitive cost of deciding _where_ to put something before you can capture it. High capture tax kills note-taking habits faster than any missing feature.
+
+### How I Minimize Capture Tax
+
+**Rule of thumb:** if it takes less than 10 seconds to capture, use Apple Notes. If it requires structure, use Notion. If it's about understanding or learning, use Heptabase. If it's a code decision, use a Git-based ADR.
+
+**Three inboxes, one triage point.** I allow myself three capture points (Apple Notes, Notion Quick Capture, Heptabase Journal) and one triage session (Sunday weekly review). Everything captured during the week gets sorted on Sunday.
+
+**Templates eliminate decisions.** In Notion, I have templates for every common note type. Starting a meeting note doesn't require thinking about format — I click the template and fill in the blanks. Reducing format decisions preserves cognitive energy for content.
+
+| Capture Scenario | Tool | Why |
+|---|---|---|
+| Fleeting thought, < 10 seconds | Apple Notes | Speed above all |
+| Meeting in progress | Notion (template) | Structure + shareability |
+| Learning new concept | Heptabase (canvas) | Spatial thinking |
+| Architecture decision | ADR in GitHub | Lives with the code |
+| Debugging insight | Notion (decision log) | Searchable, tagged to project |
+| Article/talk highlight | Notion (learning DB) | Progressive summarization |
+
+<Info>
+The best system is the one with the lowest capture tax for your most common note types. Optimize for your actual behavior, not your ideal behavior.
+</Info>
+
+---
+
+## Search vs. Structure
+
+A common debate in knowledge management: should you organize notes into folders and categories, or just dump everything in one place and rely on search?
+
+My answer: **both, but search-first**.
+
+I maintain the PARA folder structure in Notion because it helps me during weekly reviews and when I'm deliberately browsing for connections. But day-to-day retrieval? That's search. I search by keyword, by project tag, by date range. The folder structure is a backup for when search fails, not the primary retrieval method.
+
+### Making Search Work
+
+- **Consistent naming** — every meeting note starts with the date and meeting name. Every ADR starts with the ADR number and title.
+- **Tags over folders** — a note can have multiple tags but can only live in one folder. Tags are more flexible for retrieval.
+- **Write for your future self** — include context that search can find. Don't write "the issue from last week." Write "the Redis connection pool exhaustion issue from the payment service."
+- **Periodic consolidation** — every quarter, I review my most-accessed notes and make sure they're properly titled and tagged. This is maintenance, but it pays dividends.
+
+---
+
+## My Current Setup (2026)
+
+After years of experimentation, here's where I've landed:
+
+```
+┌─────────────────────────────────────────────┐
+│              CAPTURE LAYER                  │
+│  Apple Notes (speed) → Notion Quick Add     │
+│  Heptabase Journal (learning)               │
+│  ADRs in Git (code decisions)               │
+├─────────────────────────────────────────────┤
+│              ORGANIZE LAYER                 │
+│  Notion PARA (Projects, Areas,              │
+│  Resources, Archive)                        │
+│  — Meeting Notes DB                         │
+│  — Decision Log DB                          │
+│  — Learning DB                              │
+├─────────────────────────────────────────────┤
+│              THINK LAYER                    │
+│  Heptabase Canvases                         │
+│  — Concept maps for learning                │
+│  — Architecture exploration                 │
+│  — Writing and idea development             │
+├─────────────────────────────────────────────┤
+│              ACT LAYER                      │
+│  Linear (tasks and sprints)                 │
+│  GitHub (code, ADRs, PRs)                   │
+│  Motion (calendar + scheduling)             │
+└─────────────────────────────────────────────┘
+```
+
+The layers have clear boundaries:
+- **Capture** is optimized for speed and low friction
+- **Organize** is optimized for retrieval and structure
+- **Think** is optimized for understanding and connection
+- **Act** is optimized for execution and shipping
+
+Each layer uses the tool best suited to its purpose. The weekly review is the bridge that moves items between layers.
+
+---
+
+## Lessons Learned (The Hard Way)
+
+After four years of serious note-taking system building, here's what I wish I'd known at the start:
+
+**1. The tool matters less than the habit.** A consistent Apple Notes practice beats an elaborate Obsidian setup you use sporadically. Start with the simplest possible system and add complexity only when you feel genuine friction.
+
+**2. Migration is expensive.** Every tool switch costs weeks of re-organization and months of split knowledge. Choose carefully and commit for at least 6 months before evaluating.
+
+**3. Your system should serve your work, not the other way around.** If you're spending more than 30 minutes per week on system maintenance, something is wrong. Notes exist to make you more effective, not to be a hobby.
+
+**4. Perfect organization is a procrastination trap.** A messy note that exists is better than a perfectly formatted note you never wrote. Capture first, organize later.
+
+**5. The weekly review is non-negotiable.** Without a regular triage session, every system degrades into chaos. The review is what transforms a collection of notes into a functioning second brain.
+
+**6. Share your notes.** The most valuable notes are the ones that help your team, not just you. Meeting notes, decision logs, and learning summaries should be shared by default.
+
+The best note-taking system is the one you actually use. Not the one with the most features, the prettiest graph, or the most YouTube tutorials. The one you use. Every day. Without thinking about it.
+
+---
+
+<Info>
+Related reads: [The Second Brain for Engineers](/productivity/second-brain) for the PARA framework in depth, [Productivity Workflows](/productivity/workflows) for how notes feed into daily routines, and [Tools & Setup](/dev/tools-and-setup) for the complete tech stack.
+</Info>

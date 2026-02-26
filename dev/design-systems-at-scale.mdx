@@ -1,0 +1,349 @@
+---
+title: "Design Systems at Scale: What Nobody Tells You"
+description: "Lessons from building and maintaining design systems used by 200+ engineers — governance, adoption, versioning, and the politics."
+---
+
+# Design Systems at Scale: What Nobody Tells You
+
+I've built design systems at Atlassian (where the design system serves thousands of engineers) and at Weel (where it serves a smaller but equally opinionated team). The technical challenges — building accessible components, managing tokens, setting up Storybook — are the easy part. The hard part is everything else.
+
+Design systems fail because of adoption, not technology. They fail because of politics, not architecture. They fail because someone built a beautiful component library that nobody uses because it doesn't solve the problems engineers actually have.
+
+Here's what nobody tells you before you start.
+
+## Why Design Systems Fail
+
+I've watched design systems fail at three companies. The pattern is always the same:
+
+**Phase 1: Enthusiasm.** A team is formed. A Figma library is created. Components are built. Storybook is deployed. The team presents at an all-hands.
+
+**Phase 2: The Gap.** Product teams start using the system and immediately hit limitations. The `Button` doesn't support their exact layout. The `Modal` doesn't handle their edge case. The design tokens don't cover their brand variant.
+
+**Phase 3: The Fork.** Rather than waiting for the design system team to ship a fix, product teams copy the component code and modify it. Now there are two Buttons. Then three. Then seven.
+
+**Phase 4: Abandonment.** The design system team burns out filing tickets to track all the forks. Leadership questions the ROI. The team is disbanded or reduced. The system becomes a relic.
+
+The root cause is always the same: **the design system team built what they thought was needed, not what consumers actually needed**. They treated the system as a product but forgot the most important product principle — talk to your users.
+
+## Governance Models That Work
+
+Governance is the least sexy and most important topic in design system work. It answers: who decides what goes into the system, who can contribute, and how conflicts are resolved.
+
+### The three models
+
+**Centralized:** One team owns everything. They build, maintain, and gatekeep all components. This works for small orgs (under 50 engineers) but creates bottlenecks at scale. The design system team becomes a dependency that slows everyone down.
+
+**Federated:** Each product team can contribute components. The design system team reviews and maintains quality standards. This scales better but requires strong review processes and clear contribution guidelines.
+
+**Hybrid (what I recommend):** The design system team owns core primitives (Button, Input, Typography, Layout, Icons, Tokens). Product teams own domain components (InvoiceTable, PaymentForm, UserAvatar). The design system team sets standards, provides tooling, and reviews contributions to core. Product teams have full autonomy over domain components.
+
+```
+┌─────────────────────────────────────────────┐
+│            Design System Core               │
+│  Button, Input, Select, Modal, Typography   │
+│  Tokens, Layout, Icons                      │
+│  Owned by: DS Team | Changes: RFC required  │
+├─────────────────────────────────────────────┤
+│          Shared Components                  │
+│  DataTable, DatePicker, RichTextEditor      │
+│  Owned by: Contributors | Review: DS Team   │
+├─────────────────────────────────────────────┤
+│         Domain Components                   │
+│  InvoiceTable, PaymentForm, UserCard        │
+│  Owned by: Product Teams | Standards: DS    │
+└─────────────────────────────────────────────┘
+```
+
+<Info>
+The hybrid model requires the design system team to shift from "builders" to "enablers." Their primary output isn't components — it's standards, tooling, and review capacity. This is a hard cultural shift for teams that started as builders.
+</Info>
+
+### The RFC process
+
+Any change to core components goes through an RFC (Request for Comments). Not a heavyweight process — a lightweight template:
+
+1. **Problem:** What use case isn't served today?
+2. **Proposal:** What's the API change?
+3. **Alternatives considered:** What else could work?
+4. **Migration:** How do existing consumers update?
+
+RFCs are reviewed asynchronously. Most take 2-3 days. Controversial ones get a 30-minute meeting. The goal isn't bureaucracy — it's making decisions visible and giving consumers a voice.
+
+## The Inner Source Model
+
+At Atlassian, we used an "inner source" model for the design system — treating the system as an internal open-source project. Any engineer could contribute. The design system team was like an open-source maintainer team: they reviewed, merged, and maintained quality, but they didn't write all the code.
+
+This model works when:
+
+1. **Contribution is genuinely easy.** Clone, install, run Storybook, make a change, submit a PR. If the setup takes more than 15 minutes, nobody will contribute.
+2. **There's a clear contribution guide.** What makes a component "design system worthy"? What tests are required? What accessibility standards must be met?
+3. **Review turnaround is fast.** If a contribution PR sits for two weeks, the contributor will never contribute again. The SLA should be 2 business days for initial review.
+4. **Contributors get recognition.** Mention contributors in release notes. Credit them in the component documentation. Make contribution a career-positive activity.
+
+```markdown
+## Contributing a New Component
+
+### Criteria for inclusion
+- Used by 3+ teams (or has clear need from 3+ teams)
+- Has a clear, stable API
+- Meets WCAG 2.1 AA accessibility
+- Has design specs in Figma component library
+
+### PR requirements
+- [ ] Component implementation with TypeScript types
+- [ ] Unit tests (>80% coverage)
+- [ ] Storybook stories (default + all variants + interactive)
+- [ ] Accessibility tests (axe + keyboard navigation)
+- [ ] Documentation (props table, usage examples, do/don't)
+- [ ] Changeset file for versioning
+```
+
+## Versioning Strategies
+
+Versioning a design system consumed by dozens of teams is one of the hardest distribution problems in frontend engineering.
+
+### Semantic versioning with changesets
+
+I use [Changesets](https://github.com/changesets/changesets) for every design system I build. It generates changelogs, manages versions, and handles mono-package publishing.
+
+Every PR that changes component behavior includes a changeset:
+
+```markdown
+---
+"@company/ui": minor
+---
+
+Added `size="xs"` variant to Button component for compact interfaces.
+```
+
+Changesets accumulate, and when you're ready to release, the tool bumps the version, generates a changelog, and publishes.
+
+### The versioning strategy
+
+- **Patch (0.0.x):** Bug fixes, documentation updates, internal refactoring. No API changes. Zero effort for consumers.
+- **Minor (0.x.0):** New components, new props, new variants. Backward compatible. Consumers opt-in when ready.
+- **Major (x.0.0):** Breaking changes. Should be rare — no more than 1-2 per year. Always accompanied by a migration guide and codemod.
+
+### Codemods are non-negotiable
+
+When you ship a breaking change without a codemod, you're asking 200 engineers to manually update their code. That doesn't happen. They pin the old version and your system fragments.
+
+```tsx
+// Codemod example: rename `isFullWidth` to `width="full"`
+// Using jscodeshift
+export default function transformer(file, api) {
+  const j = api.jscodeshift;
+  const root = j(file.source);
+
+  root.findJSXElements('Button').forEach((path) => {
+    const fullWidthProp = path.node.openingElement.attributes.find(
+      (attr) => attr.name?.name === 'isFullWidth'
+    );
+
+    if (fullWidthProp) {
+      // Remove isFullWidth
+      path.node.openingElement.attributes = path.node.openingElement.attributes.filter(
+        (attr) => attr !== fullWidthProp
+      );
+      // Add width="full"
+      path.node.openingElement.attributes.push(
+        j.jsxAttribute(j.jsxIdentifier('width'), j.literal('full'))
+      );
+    }
+  });
+
+  return root.toSource();
+}
+```
+
+Run the codemod across all consuming repos, submit PRs automatically, and teams just need to review and merge. That's how breaking changes ship at scale.
+
+<Warning>
+If you can't write a codemod for a breaking change, the API change is probably too complex. Simplify the migration path until it's automatable.
+</Warning>
+
+## Documentation as Product
+
+Documentation isn't a nice-to-have. It's the product. If engineers can't find what they need in under 30 seconds, they'll build it themselves.
+
+### What good documentation looks like
+
+Every component page needs:
+
+1. **Live example** — interactive, editable in the browser
+2. **Props table** — auto-generated from TypeScript types
+3. **Variants gallery** — every visual variant side by side
+4. **Do/Don't examples** — common mistakes and correct usage
+5. **Accessibility notes** — keyboard behavior, screen reader announcements, ARIA attributes
+6. **Related components** — "Looking for X? Try Y instead"
+
+### Storybook as source of truth
+
+Storybook serves triple duty: it's the development environment, the documentation, and the visual regression test suite.
+
+```tsx
+// Button.stories.tsx
+import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from './Button';
+
+const meta: Meta<typeof Button> = {
+  title: 'Components/Button',
+  component: Button,
+  argTypes: {
+    variant: {
+      control: 'select',
+      options: ['primary', 'secondary', 'ghost', 'danger'],
+      description: 'Visual style of the button',
+    },
+    size: {
+      control: 'select',
+      options: ['sm', 'md', 'lg'],
+    },
+  },
+  parameters: {
+    docs: {
+      description: {
+        component: 'Buttons trigger actions. Use primary for the main CTA, secondary for alternatives, ghost for tertiary actions.',
+      },
+    },
+  },
+};
+
+export default meta;
+type Story = StoryObj<typeof Button>;
+
+export const Primary: Story = {
+  args: { variant: 'primary', children: 'Primary Action' },
+};
+
+export const AllVariants: Story = {
+  render: () => (
+    <div style={{ display: 'flex', gap: '1rem' }}>
+      <Button variant="primary">Primary</Button>
+      <Button variant="secondary">Secondary</Button>
+      <Button variant="ghost">Ghost</Button>
+      <Button variant="danger">Danger</Button>
+    </div>
+  ),
+};
+
+export const Loading: Story = {
+  args: { variant: 'primary', isLoading: true, children: 'Saving...' },
+};
+```
+
+### The documentation SLA
+
+At Weel, we have a rule: no component ships without documentation. Not "we'll add docs later" — no docs, no release. This sounds harsh but it prevents the single biggest design system failure mode: undiscoverable components that engineers rebuild because they didn't know the system had one.
+
+## Component APIs vs Design Tokens
+
+A design system has two layers: components and tokens. Most teams focus on components and underinvest in tokens. This is backwards.
+
+**Tokens are more important than components** because:
+
+1. Tokens define the visual language. Components implement it.
+2. Teams that can't use your components can still use your tokens.
+3. Theming, dark mode, and brand variants are token problems, not component problems.
+4. Tokens change less frequently than components, providing a more stable foundation.
+
+```json
+{
+  "color": {
+    "primary": { "value": "#ff3131", "type": "color" },
+    "primary-hover": { "value": "#e02b2b", "type": "color" },
+    "surface": { "value": "#ffffff", "type": "color" },
+    "surface-raised": { "value": "#f5f5f5", "type": "color" },
+    "text": { "value": "#1a1a1a", "type": "color" },
+    "text-subtle": { "value": "#6b6b6b", "type": "color" }
+  },
+  "spacing": {
+    "xs": { "value": "4px", "type": "dimension" },
+    "sm": { "value": "8px", "type": "dimension" },
+    "md": { "value": "16px", "type": "dimension" },
+    "lg": { "value": "24px", "type": "dimension" },
+    "xl": { "value": "32px", "type": "dimension" }
+  },
+  "radius": {
+    "sm": { "value": "4px", "type": "dimension" },
+    "md": { "value": "8px", "type": "dimension" },
+    "lg": { "value": "12px", "type": "dimension" },
+    "full": { "value": "9999px", "type": "dimension" }
+  }
+}
+```
+
+Use [Style Dictionary](https://amzn.github.io/style-dictionary/) or [Tokens Studio](https://tokens.studio/) to transform tokens into CSS custom properties, Tailwind config, iOS values, and Android values from a single source.
+
+```css
+/* Generated from tokens */
+:root {
+  --color-primary: #ff3131;
+  --color-primary-hover: #e02b2b;
+  --color-surface: #ffffff;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --radius-md: 8px;
+}
+```
+
+## Measuring Adoption
+
+You can't improve what you don't measure. Here's how I track design system health:
+
+### Quantitative metrics
+
+| Metric | How to Measure | Target |
+|--------|---------------|--------|
+| Component coverage | % of UI instances using DS components vs custom | >80% |
+| Token coverage | % of color/spacing values using tokens vs hardcoded | >90% |
+| Import frequency | npm download stats or import analysis | Trending up |
+| Version freshness | % of teams on latest major version | >70% within 30 days |
+| Contribution rate | PRs from non-DS-team members per quarter | 5+ per quarter |
+
+### Qualitative metrics
+
+- **Developer satisfaction survey** (quarterly) — "How easy is it to build UI with the design system?" on a 1-5 scale
+- **Time to first component** — How long does it take a new engineer to use their first DS component? Target: under 1 hour from onboarding
+- **Support ticket volume** — Trending down means the system is getting more self-service
+
+### Automated tracking
+
+```bash
+# Script to count design system imports vs total component imports
+# Run weekly, track in a dashboard
+rg "from '@company/ui'" --count-matches src/ | \
+  awk -F: '{sum += $2} END {print "DS imports:", sum}'
+
+rg "from '\./components|from '\.\./components" --count-matches src/ | \
+  awk -F: '{sum += $2} END {print "Custom imports:", sum}'
+```
+
+<Tip>
+The most important metric is one you can't automate: do engineers reach for the design system first, or do they build custom components first? If the system is well-designed and well-documented, the default behavior is to use it. If it's not, no amount of enforcement will change behavior.
+</Tip>
+
+## The Political Reality
+
+Let me be honest about something most design system articles skip: the politics.
+
+**Design systems are cross-team work.** Cross-team work means competing priorities, different timelines, and conflicting opinions. The design system team thinks consistency matters most. The product team thinks shipping features matters most. Both are right.
+
+### Navigating the politics
+
+1. **Never mandate adoption.** Mandates create resentment. Instead, make the system so good that not using it feels like extra work. If teams are choosing to build custom components, that's feedback on your system, not on their behavior.
+
+2. **Align with leadership goals.** "Design consistency" doesn't get budget. "Ship features 30% faster" does. "Reduce UI bugs by 40%" does. "Meet accessibility compliance without dedicated effort" does. Frame the system in terms leadership cares about.
+
+3. **Pick your battles.** You don't need every team to use every component. Start with the teams most likely to adopt, make them successful, and let word of mouth do the rest. One enthusiastic team is worth more than ten reluctant ones.
+
+4. **Handle disagreements gracefully.** When a senior engineer says "your Modal doesn't work for our use case," the wrong response is "you're using it wrong." The right response is "show me what you need" followed by either adapting the component or helping them build a well-structured custom one.
+
+5. **Share credit broadly.** When a product team ships faster because of the design system, credit the product team. When a contribution from a product engineer improves a component, celebrate that engineer publicly. The design system team's success is measured by everyone else's success.
+
+## The Long Game
+
+Design systems are not projects with an end date. They're products with a lifecycle. Budget for ongoing maintenance: typically 2-4 dedicated engineers for a system serving 100+ consumers. Plan for quarterly audits: are components still meeting accessibility standards? Are tokens still reflecting the design language? Is documentation still accurate?
+
+The companies that get design systems right treat them as infrastructure — invisible when working, immediately noticed when broken, and continuously invested in. That's the goal.

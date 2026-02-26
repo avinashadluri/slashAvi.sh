@@ -1,0 +1,574 @@
+---
+title: "AI Agents in Production: Patterns and Pitfalls"
+description: "Architecture patterns for production AI agents — tool use, planning, memory, and the guardrails that keep them safe."
+---
+
+# AI Agents in Production: Patterns and Pitfalls
+
+The word "agent" has been so thoroughly abused by marketing that it's almost lost meaning. Every chatbot with an API call is now an "AI agent." Every workflow automation tool is "agentic AI." Every LLM wrapper is an "intelligent agent platform."
+
+Let me be precise about what I mean. An AI agent is a system where an LLM makes decisions about which actions to take, executes those actions, observes the results, and iterates. The key distinction from a chain or pipeline is that the execution path is not predetermined — the model decides what to do next based on what it observes.
+
+I've built agent systems for PromptLib and MetaLabs — not research prototypes, but production systems handling real user requests. Here's what I've learned about the patterns that work, the pitfalls that don't, and the guardrails that keep everything from going sideways.
+
+## What "Agent" Actually Means
+
+Let me draw the line clearly:
+
+**Not an agent**: A system that takes input, runs it through a prompt, and returns output. That's an LLM call.
+
+**Not an agent**: A system that chains three LLM calls in sequence (extract → transform → summarize). That's a pipeline.
+
+**An agent**: A system where the LLM decides: "I need more information. Let me search the database. Okay, that result is ambiguous. Let me ask a clarifying question. Now I have enough context to answer."
+
+The defining characteristic is **autonomous decision-making within a loop**. The model observes, thinks, acts, and repeats until it believes the task is complete.
+
+```python
+# The simplest possible agent loop
+def agent_loop(task: str, tools: dict, max_steps: int = 10) -> str:
+    messages = [{"role": "user", "content": task}]
+
+    for step in range(max_steps):
+        response = llm.chat(messages, tools=tools)
+
+        if response.tool_calls:
+            for call in response.tool_calls:
+                result = tools[call.name](**call.arguments)
+                messages.append({"role": "tool", "content": str(result)})
+        else:
+            return response.content
+
+    return "Max steps reached without resolution"
+```
+
+That's it. Everything else — ReAct, planning, memory, multi-agent architectures — is built on this foundation.
+
+## The ReAct Pattern
+
+ReAct (Reasoning + Acting) is the most practical agent pattern for production. The model alternates between reasoning about what to do and taking action.
+
+```python
+REACT_SYSTEM_PROMPT = """You are a helpful assistant with access to tools.
+
+For each step:
+1. **Thought**: Reason about what you need to do next
+2. **Action**: Choose a tool and provide its arguments
+3. **Observation**: Review the tool's output
+
+Repeat until you have enough information to provide a final answer.
+
+Available tools:
+- search_docs(query: str) -> list[str]: Search the knowledge base
+- get_user_info(user_id: str) -> dict: Get user account details
+- create_ticket(subject: str, body: str, priority: str) -> str: Create support ticket
+
+Important:
+- Never guess when you can look up the answer
+- If a tool returns no results, try rephrasing or a different approach
+- If you cannot resolve the issue after 3 attempts, escalate to human support
+"""
+```
+
+### Why ReAct Works in Production
+
+1. **Explainability**: Every step has a "Thought" that explains why the agent is doing what it's doing. This is invaluable for debugging and auditing.
+
+2. **Interruptibility**: You can inspect the agent's reasoning at any step and intervene if it's going down the wrong path.
+
+3. **Predictability**: By constraining the available tools and the reasoning format, the agent behaves more consistently than free-form generation.
+
+### Real Example from MetaLabs
+
+Here's an actual agent trace from our system (simplified):
+
+```
+User: "I was charged twice for my subscription last month"
+
+Thought: I need to look up this user's billing history to verify the claim.
+Action: get_user_info(user_id="usr_4821")
+Observation: {plan: "pro", billing_history: [{date: "2025-01-01", amount: 29.99}, 
+             {date: "2025-01-15", amount: 29.99}]}
+
+Thought: The user was indeed charged twice — on Jan 1 and Jan 15. The second charge 
+appears to be a mid-cycle charge, possibly from a plan change. Let me check if there 
+was a plan change.
+Action: search_docs(query="mid-cycle billing plan change policy")
+Observation: ["When a user upgrades mid-cycle, they are charged the prorated 
+             difference immediately..."]
+
+Thought: The second charge could be a prorated upgrade charge, not a duplicate. 
+But $29.99 is the full amount, not prorated. This looks like a genuine duplicate 
+charge. I should create a ticket for the billing team.
+Action: create_ticket(
+  subject="Possible duplicate charge - usr_4821", 
+  body="User charged $29.99 twice in January (Jan 1 and Jan 15). 
+        Second charge is full amount, not prorated. Needs investigation.",
+  priority="high"
+)
+Observation: Ticket created: TKT-4921
+
+Final Answer: I can see you were charged $29.99 on both January 1st and January 15th. 
+The second charge doesn't appear to be a prorated upgrade — it's the full subscription 
+amount. I've created a high-priority ticket (TKT-4921) for our billing team to 
+investigate. You should hear back within 24 hours. If you need immediate help, you 
+can reach our billing team directly at billing@metalabs.dev.
+```
+
+Notice how the agent didn't just refund automatically or dismiss the complaint. It investigated, reasoned, and escalated appropriately. That's the value of an agent over a pipeline.
+
+## Tool Use Design
+
+Tools are the agent's hands. Designing them well is the difference between a useful agent and a dangerous one.
+
+### Principles
+
+**1. Tools should be atomic and well-defined**
+
+```python
+# Good: clear, single-purpose tools
+def search_docs(query: str, max_results: int = 5) -> list[dict]:
+    """Search the knowledge base and return matching documents."""
+    ...
+
+def get_order_status(order_id: str) -> dict:
+    """Get the current status and details of an order."""
+    ...
+
+# Bad: vague, multi-purpose tools
+def do_stuff(action: str, params: dict) -> dict:
+    """Do various things based on action parameter."""
+    ...
+```
+
+**2. Tools should have descriptive names and docstrings**
+
+The LLM reads the tool descriptions to decide which one to use. If the description is ambiguous, the model will pick the wrong tool.
+
+**3. Tools should return structured, informative results**
+
+```python
+# Good: the agent can reason about this
+def search_docs(query: str) -> list[dict]:
+    results = vector_search(query)
+    return [{
+        "title": r.title,
+        "content": r.content[:500],
+        "relevance_score": r.score,
+        "source": r.source_url,
+    } for r in results]
+
+# Bad: the agent gets no context
+def search_docs(query: str) -> str:
+    return "Found 3 results"
+```
+
+**4. Tools should be safe by default**
+
+Every tool should be either read-only or require explicit confirmation for destructive actions.
+
+```python
+tools = {
+    # Read-only: safe to call autonomously
+    "search_docs": Tool(fn=search_docs, requires_approval=False),
+    "get_user_info": Tool(fn=get_user_info, requires_approval=False),
+
+    # Write operations: require human approval
+    "issue_refund": Tool(fn=issue_refund, requires_approval=True),
+    "delete_account": Tool(fn=delete_account, requires_approval=True),
+    "send_email": Tool(fn=send_email, requires_approval=True),
+}
+```
+
+<Warning>
+Never give an agent a tool that can delete data, send communications, or move money without human-in-the-loop approval. "But it'll be slower!" Yes. And it won't accidentally email 10,000 customers a refund confirmation.
+</Warning>
+
+## Planning and Decomposition
+
+For complex tasks, the agent needs to plan before acting. Without planning, agents take the first path they think of, which is often suboptimal.
+
+### Plan-Then-Execute
+
+```python
+PLANNING_PROMPT = """Given this task, create a step-by-step plan before taking action.
+
+Task: {task}
+
+Create a numbered plan with 3-7 steps. Each step should be:
+- Specific and actionable
+- Achievable with the available tools
+- Ordered logically (dependencies first)
+
+After creating the plan, execute each step in order.
+If a step fails or produces unexpected results, revise the remaining plan."""
+```
+
+### When Planning Helps
+
+- Multi-step research tasks: "Compare our pricing to three competitors and summarize the differences"
+- Complex workflows: "Set up a new project with the standard template, add the team members from the design doc, and configure notifications"
+- Tasks with dependencies: "Update the user's email, then re-send the verification, then notify their admin"
+
+### When Planning Hurts
+
+- Simple single-step tasks (planning is overhead)
+- Time-sensitive tasks where speed matters more than optimality
+- Tasks where the environment is so dynamic that plans become stale immediately
+
+## Memory Systems
+
+Agents without memory are stateless — every conversation starts from zero. For production agents, you need at least two types of memory.
+
+### Short-Term Memory (Conversation Context)
+
+The simplest form: keep the conversation history in the context window.
+
+```python
+class ConversationMemory:
+    def __init__(self, max_tokens: int = 8000):
+        self.messages = []
+        self.max_tokens = max_tokens
+
+    def add(self, message: dict):
+        self.messages.append(message)
+        self._trim()
+
+    def _trim(self):
+        while self._token_count() > self.max_tokens:
+            if len(self.messages) > 2:
+                self.messages.pop(1)  # Keep system message, remove oldest
+            else:
+                break
+
+    def get_messages(self) -> list[dict]:
+        return self.messages
+```
+
+### Long-Term Memory (Persistent Knowledge)
+
+Facts the agent learns that should persist across conversations.
+
+```python
+class LongTermMemory:
+    def __init__(self, db, user_id: str):
+        self.db = db
+        self.user_id = user_id
+
+    async def remember(self, fact: str, category: str):
+        embedding = await embed(fact)
+        await self.db.insert({
+            "user_id": self.user_id,
+            "fact": fact,
+            "category": category,
+            "embedding": embedding,
+            "timestamp": datetime.now(),
+        })
+
+    async def recall(self, query: str, limit: int = 5) -> list[str]:
+        query_embedding = await embed(query)
+        results = await self.db.vector_search(
+            embedding=query_embedding,
+            filter={"user_id": self.user_id},
+            limit=limit,
+        )
+        return [r["fact"] for r in results]
+```
+
+### Episodic Memory (Past Task Records)
+
+Records of what the agent did in similar past tasks. This is the most underrated memory type.
+
+```python
+class EpisodicMemory:
+    """Stores summaries of past agent interactions for learning."""
+
+    async def store_episode(self, task: str, steps: list, outcome: str):
+        summary = await llm.generate(
+            f"Summarize this agent interaction for future reference:\n"
+            f"Task: {task}\nSteps: {steps}\nOutcome: {outcome}"
+        )
+        await self.db.insert({
+            "task_summary": summary,
+            "outcome": outcome,
+            "embedding": await embed(summary),
+            "timestamp": datetime.now(),
+        })
+
+    async def find_similar_episodes(self, task: str) -> list[dict]:
+        embedding = await embed(task)
+        return await self.db.vector_search(embedding=embedding, limit=3)
+```
+
+When the agent encounters a new task, it can check: "Have I done something like this before? What worked?" This dramatically improves consistency over time.
+
+## Guardrails and Safety Nets
+
+This is the section that separates production agents from demos. Without guardrails, agents are liabilities.
+
+### Input Guardrails
+
+```python
+async def validate_agent_input(input_text: str) -> tuple[bool, str]:
+    if len(input_text) > 10000:
+        return False, "Input too long"
+
+    if await detect_prompt_injection(input_text):
+        log_security_event("prompt_injection_attempt", input_text)
+        return False, "Invalid input"
+
+    if await contains_pii(input_text):
+        input_text = await redact_pii(input_text)
+
+    return True, input_text
+```
+
+### Output Guardrails
+
+```python
+async def validate_agent_output(output: str, context: dict) -> str:
+    if await contains_pii(output):
+        output = await redact_pii(output)
+        log_safety_event("pii_in_output")
+
+    if await detect_harmful_content(output):
+        log_safety_event("harmful_content")
+        return "I apologize, but I cannot provide that response. Let me connect you with a human agent."
+
+    if not await is_on_topic(output, context["allowed_topics"]):
+        log_safety_event("off_topic_response")
+        return f"I can only help with {', '.join(context['allowed_topics'])}. Let me know if you have questions about those topics."
+
+    return output
+```
+
+### Execution Guardrails
+
+```python
+class AgentExecutor:
+    def __init__(self, max_steps: int = 15, max_cost: float = 0.50,
+                 max_time_seconds: int = 60):
+        self.max_steps = max_steps
+        self.max_cost = max_cost
+        self.max_time = max_time_seconds
+
+    async def run(self, task: str) -> AgentResult:
+        start_time = time.monotonic()
+        total_cost = 0.0
+        steps = []
+
+        for step_num in range(self.max_steps):
+            elapsed = time.monotonic() - start_time
+            if elapsed > self.max_time:
+                return AgentResult(
+                    status="timeout",
+                    message="Task took too long. Escalating to human.",
+                    steps=steps,
+                )
+
+            if total_cost > self.max_cost:
+                return AgentResult(
+                    status="cost_limit",
+                    message="Cost limit reached. Escalating to human.",
+                    steps=steps,
+                )
+
+            step_result = await self._execute_step(task, steps)
+            total_cost += step_result.cost
+            steps.append(step_result)
+
+            if step_result.is_final:
+                return AgentResult(status="complete", **step_result)
+
+        return AgentResult(
+            status="max_steps",
+            message="Could not complete in allowed steps. Escalating.",
+            steps=steps,
+        )
+```
+
+<Tip>
+Set cost limits per-agent-invocation, not per-month. A runaway agent loop can burn through a monthly budget in minutes. Per-invocation limits cap the blast radius.
+</Tip>
+
+### Human-in-the-Loop Checkpoints
+
+Define which actions always require human approval. This is not optional for production agents.
+
+```python
+APPROVAL_REQUIRED_ACTIONS = {
+    "issue_refund": "Issuing refund of ${amount} to {customer}",
+    "send_email": "Sending email to {recipient}: {subject}",
+    "modify_subscription": "Changing {customer} plan from {old} to {new}",
+    "delete_data": "Deleting {resource_type} {resource_id}",
+}
+
+async def execute_with_approval(action: str, params: dict) -> dict:
+    if action in APPROVAL_REQUIRED_ACTIONS:
+        description = APPROVAL_REQUIRED_ACTIONS[action].format(**params)
+        approval = await request_human_approval(
+            action=action,
+            description=description,
+            timeout_minutes=30,
+        )
+        if not approval.approved:
+            return {"status": "rejected", "reason": approval.reason}
+
+    return await execute_action(action, params)
+```
+
+## Observability for Agent Systems
+
+Agents are harder to debug than pipelines because the execution path varies. You need comprehensive tracing.
+
+### Trace Everything
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+async def agent_step(step_num: int, messages: list, tools: dict):
+    with trace_span(f"agent_step_{step_num}") as span:
+        span.set_attribute("step_num", step_num)
+        span.set_attribute("message_count", len(messages))
+
+        response = await llm.chat(messages, tools=tools)
+
+        span.set_attribute("model", response.model)
+        span.set_attribute("tokens_used", response.usage.total_tokens)
+
+        if response.tool_calls:
+            for call in response.tool_calls:
+                span.add_event("tool_call", {
+                    "tool": call.name,
+                    "args": json.dumps(call.arguments),
+                })
+                logger.info("agent_tool_call",
+                    step=step_num,
+                    tool=call.name,
+                    args=call.arguments)
+        else:
+            span.add_event("final_response")
+            logger.info("agent_final_response",
+                step=step_num,
+                response_length=len(response.content))
+
+        return response
+```
+
+### Dashboards for Agents
+
+Beyond the standard metrics (latency, error rate, cost), agent systems need:
+
+- **Steps per task**: How many steps does the agent take on average? Increasing trends suggest confusion or inefficiency.
+- **Tool usage distribution**: Which tools are used most? Are some never used?
+- **Approval wait time**: How long do human-in-the-loop approvals take? This is often the latency bottleneck.
+- **Escalation rate**: What percentage of tasks does the agent escalate to humans? Too low means it's overconfident. Too high means it's not useful.
+- **Loop detection**: How often does the agent repeat the same action? This indicates it's stuck.
+
+## Failure Modes and Recovery
+
+Agents fail in ways that pipelines don't. Know the failure modes and build recovery mechanisms.
+
+### The Infinite Loop
+
+The agent calls the same tool repeatedly with the same arguments, getting the same result, and never progressing.
+
+```python
+def detect_loop(steps: list[AgentStep], threshold: int = 3) -> bool:
+    if len(steps) < threshold:
+        return False
+
+    recent_actions = [
+        (s.tool_name, json.dumps(s.tool_args, sort_keys=True))
+        for s in steps[-threshold:]
+    ]
+    return len(set(recent_actions)) == 1
+```
+
+### The Hallucinated Tool
+
+The agent tries to call a tool that doesn't exist — it invents tool names based on what it wishes were available.
+
+```python
+def safe_tool_call(tool_name: str, tools: dict, **kwargs):
+    if tool_name not in tools:
+        return {
+            "error": f"Tool '{tool_name}' does not exist. "
+                     f"Available tools: {list(tools.keys())}"
+        }
+    return tools[tool_name](**kwargs)
+```
+
+### The Confident Wrong Answer
+
+The agent stops too early with a wrong answer because it has high confidence in bad data.
+
+Mitigation: For high-stakes tasks, require the agent to verify its answer with a second tool call before presenting it as final.
+
+### The Runaway Cost
+
+An agent on a complex task makes 50 tool calls, each involving an LLM call, before realizing it's on the wrong track.
+
+Mitigation: Per-invocation cost limits, step limits, and early termination when the agent's reasoning becomes circular.
+
+## Multi-Agent Architectures
+
+Sometimes one agent isn't enough. Multi-agent patterns are useful when tasks naturally decompose into specialized subtasks.
+
+### The Supervisor Pattern
+
+One "supervisor" agent delegates to specialized sub-agents.
+
+```python
+class SupervisorAgent:
+    def __init__(self):
+        self.specialists = {
+            "billing": BillingAgent(),
+            "technical": TechnicalSupportAgent(),
+            "account": AccountManagementAgent(),
+        }
+
+    async def handle(self, task: str) -> str:
+        classification = await self.classify_task(task)
+
+        if classification.specialist in self.specialists:
+            agent = self.specialists[classification.specialist]
+            return await agent.handle(task)
+
+        return await self.handle_general(task)
+```
+
+### When Multi-Agent Is Worth It
+
+- Tasks that require genuinely different expertise (billing vs technical support)
+- Tasks where different agents need different tool access (read-only analyst vs write-capable admin)
+- Tasks where you want to isolate failure domains (one agent crashing shouldn't take down the system)
+
+### When Multi-Agent Is Overkill
+
+- When a single agent with good tools can handle it (most cases)
+- When the routing logic is more complex than the agents themselves
+- When you're adding agents to match an org chart instead of solving a technical problem
+
+<Info>
+Start with one agent. Only add a second when you can demonstrate that the single agent is failing because it needs different tools, different permissions, or different reasoning strategies for different subtasks. "It would be architecturally clean" is not sufficient justification.
+</Info>
+
+## Real Lessons from Building Agent Products
+
+After shipping agent systems, here's what I know now that I didn't know when I started:
+
+**Agents are expensive**. Each "step" is an LLM call. A 5-step agent interaction costs 5x a single LLM call. Budget for this from day one.
+
+**Users don't care that it's an agent**. They care that it solved their problem. The "autonomous reasoning" is a feature for engineers, not users. Don't expose the loop — show the result.
+
+**Deterministic beats autonomous for 90% of tasks**. If you can write the workflow as a pipeline, do that. Agents are for the 10% of cases where the execution path genuinely can't be predetermined.
+
+**Guardrails are features, not restrictions**. Every guardrail you add — cost limits, step limits, approval requirements — makes the agent more trustworthy and therefore more useful. Users (and your operations team) will thank you.
+
+**Observability is non-negotiable**. If you can't trace exactly what your agent did and why, you can't debug it, improve it, or defend it when something goes wrong. Log everything.
+
+**Start narrow, expand gradually**. Launch with 3 tools and a limited scope. Add tools and capabilities based on what users actually need. An agent that does 3 things well is infinitely more valuable than one that does 30 things unreliably.
+
+The future of production AI is agentic. But the agents that succeed in production won't be the most autonomous or the most impressive in demos. They'll be the most reliable, the most observable, and the most trusted. Build for that.

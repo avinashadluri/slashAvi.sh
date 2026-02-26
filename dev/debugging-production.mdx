@@ -1,0 +1,399 @@
+---
+title: "Debugging Production: A Staff Engineer's Playbook"
+description: "Systematic approaches to debugging production issues — from 'something is wrong' to 'here's the root cause and the fix'."
+---
+
+# Debugging Production: A Staff Engineer's Playbook
+
+The Slack message comes in at 2:47 PM on a Tuesday: "Something is wrong with checkout. Users are reporting errors." Your heart rate goes up. You open your laptop. What do you do first?
+
+I've been on the receiving end of this message dozens of times across Atlassian, Bugcrowd, and Weel. Each time, the instinct is to dive into code. The instinct is wrong. Production debugging is not about code — it's about information gathering, hypothesis testing, and communication. The code is the last thing you look at.
+
+Here's the playbook I've developed over 15 years.
+
+## The First 5 Minutes
+
+The first 5 minutes of a production incident determine whether you resolve it in 30 minutes or 3 hours. Here's my exact sequence:
+
+**Minute 1: Confirm the problem is real.** Check monitoring dashboards. Is error rate actually elevated? Is latency spiking? Sometimes "users are reporting errors" means one user saw one error once. Don't spin up an incident for a single transient error.
+
+**Minute 2: Assess blast radius.** How many users are affected? All users? Users in a specific region? Users on a specific plan? Is this a complete outage or a degradation? This determines severity and who needs to be notified.
+
+**Minute 3: Check what changed.** Open your deployment log. Was there a deploy in the last hour? A config change? A feature flag toggle? A third-party service update? The answer to "what changed?" resolves 70% of production issues.
+
+**Minute 4: Communicate.** Post in the incident channel: what you know, what you don't know, and what you're doing next. Even if the answer is "investigating — will update in 15 minutes." Silence during an incident is worse than bad news.
+
+**Minute 5: Decide — rollback or investigate?** If a deploy happened recently and the timing correlates, roll back first, investigate later. Don't spend 45 minutes debugging when a 2-minute rollback would restore service.
+
+<Warning>
+The biggest mistake in incident response is continuing to investigate when you should be mitigating. If you can restore service with a rollback, config change, or feature flag toggle, do that FIRST. Debug the root cause after users are happy.
+</Warning>
+
+## The Triage Framework
+
+Once the immediate response is handled, I use a structured triage framework. The goal is to systematically narrow down possibilities.
+
+### Level 1: Is it us or them?
+
+Before debugging your code, confirm the problem is in your system.
+
+- **Check third-party status pages.** AWS, Stripe, Auth0, Datadog — whatever you depend on. A third-party outage disguised as your bug has wasted countless engineering hours.
+- **Check infrastructure.** Is the database healthy? Is CPU/memory normal? Are there network issues?
+- **Check DNS and CDN.** Sometimes the problem is that CloudFront is serving stale content or a DNS change hasn't propagated.
+
+```bash
+# Quick checks
+curl -o /dev/null -s -w "%{http_code} %{time_total}s\n" https://yourapp.com/health
+
+# Check if the issue is regional
+curl -o /dev/null -s -w "%{http_code}\n" --resolve yourapp.com:443:SPECIFIC_IP https://yourapp.com/health
+```
+
+### Level 2: Where in the stack?
+
+If it's your system, narrow down the layer:
+
+| Layer | Signals |
+|-------|---------|
+| CDN/Edge | Stale content, wrong headers, 403s |
+| Load balancer | 502/503 errors, uneven distribution |
+| Application | Error logs, slow queries, exceptions |
+| Database | Connection pool exhaustion, slow queries, locks |
+| External service | Timeout errors, elevated latency to specific endpoints |
+| Client-side | JavaScript errors, rendering failures, network errors |
+
+### Level 3: When did it start?
+
+Correlate the start time with events:
+
+- Deployment timestamps
+- Config changes
+- Feature flag toggles
+- Cron job executions
+- Traffic spikes
+- Third-party API changes
+
+I keep a `#deployments` channel where every deploy, config change, and flag toggle is automatically posted. During an incident, scrolling back through this channel is the fastest way to find the trigger.
+
+## Reading Logs Like a Detective
+
+Logs are your primary evidence. But reading logs is a skill — you need to know what to look for and how to filter out noise.
+
+### Start with the error, work backward
+
+Don't start from the beginning of the request. Start from the error and trace backward:
+
+```
+# Find the error
+ERROR [2026-02-26T14:47:23Z] PaymentService: 
+  Charge failed for user_8a3f — Stripe returned 402
+
+# Now find the request that caused it
+grep "user_8a3f" logs | grep "14:47"
+
+# Trace the full request lifecycle
+grep "req_id=abc123" logs | sort
+```
+
+### Look for patterns, not individual errors
+
+A single error is noise. A pattern is signal.
+
+```
+# Count errors by type in the last hour
+grep "ERROR" logs | grep "14:" | 
+  awk '{print $4}' | sort | uniq -c | sort -rn
+
+# Output:
+# 847 PaymentService: Charge failed
+#  12 AuthService: Token expired
+#   3 EmailService: Send failed
+```
+
+847 payment failures is a pattern. 12 token expirations is normal churn. 3 email failures is noise. Focus on the 847.
+
+### Correlation is not causation
+
+The most dangerous trap in log analysis: assuming that because two things happen at the same time, one caused the other. A memory spike at 14:45 and payment errors at 14:47 might be related. Or the memory spike might be from a cron job that runs every hour and has nothing to do with payments.
+
+Verify causation by:
+1. Finding the causal chain in the logs (A led to B led to C)
+2. Reproducing the issue in a staging environment
+3. Checking if the supposed cause has happened before without the effect
+
+## Reproducing Issues
+
+Reproducing a production bug in a controlled environment is half the battle. Once you can reproduce it, you can debug it.
+
+### The reproduction hierarchy
+
+1. **Unit test** — Fastest feedback loop. Can you write a test that fails with the same error?
+2. **Local environment** — Can you hit the same code path locally with the same inputs?
+3. **Staging environment** — Can you reproduce with production-like data and config?
+4. **Production (safely)** — Can you trigger the issue with a test account in production?
+
+### When you can't reproduce
+
+Some bugs only manifest under production conditions — specific data, specific load, specific timing. For these:
+
+- **Add logging.** Deploy additional structured logging around the suspected code path. Make the logs temporary and behind a flag.
+- **Use feature flags for debugging.** Enable verbose logging for a specific user or a percentage of traffic.
+- **Check for race conditions.** If the bug is intermittent, it's often a race condition. Think about what concurrent operations could interfere with each other.
+
+```tsx
+// Temporary debug logging behind a flag
+async function processPayment(userId: string, amount: number) {
+  const debugMode = await getFeatureFlag('debug-payments', userId);
+  
+  if (debugMode) {
+    logger.info('Payment debug', {
+      userId,
+      amount,
+      timestamp: Date.now(),
+      stripeConfig: getStripeConfig(),
+      userState: await getUserPaymentState(userId),
+    });
+  }
+  
+  // ... normal payment logic
+}
+```
+
+<Tip>
+Structured logging is worth 10x unstructured logging during an incident. If your logs are `JSON` with consistent fields (`userId`, `requestId`, `traceId`, `service`, `duration`), you can query them. If they're unstructured strings, you're grep-ing blind.
+</Tip>
+
+## Bisecting Deployments
+
+When you know the issue started after a deploy but before the next one, and the deploy contains 20 PRs, you need to bisect.
+
+### The manual approach
+
+1. Check the deploy's PR list
+2. Group by risk: database migrations, API changes, and third-party integrations are higher risk than UI tweaks
+3. Read the high-risk PRs first — usually 3-5 of the 20 are worth investigating
+4. Check if any PR touched the code path in the error logs
+
+### The automated approach
+
+If your CI supports it, deploy individual commits to staging and run the reproduction steps:
+
+```bash
+# List commits in the deploy
+git log --oneline v2.45.0..v2.46.0
+
+# Binary search for the breaking commit
+git bisect start
+git bisect bad v2.46.0
+git bisect good v2.45.0
+# Deploy each commit git bisect suggests, test, mark good/bad
+git bisect good  # or git bisect bad
+```
+
+Git bisect in production debugging is underrated. It's especially effective when combined with automated smoke tests that can verify the reproduction case.
+
+## The "What Changed?" Checklist
+
+I keep this checklist bookmarked. During any production issue, I run through it:
+
+- [ ] **Code deploy** — Was code deployed in the last 4 hours?
+- [ ] **Config change** — Were environment variables, feature flags, or remote config changed?
+- [ ] **Database migration** — Was a migration run? Did it complete successfully?
+- [ ] **Infrastructure change** — Was anything scaled up/down? Were instances replaced?
+- [ ] **Third-party change** — Did a dependency update? Did a provider have an incident?
+- [ ] **Traffic pattern** — Is there unusual traffic? A bot? A DDoS? A viral link?
+- [ ] **Certificate/DNS** — Did an SSL cert expire? Was DNS modified?
+- [ ] **Cron job** — Did a scheduled job run and modify shared state?
+- [ ] **Data change** — Did someone modify production data manually?
+- [ ] **Cache** — Was a cache cleared or did it expire?
+
+Nine times out of ten, the answer to "what changed?" is the answer to "what broke?"
+
+## Communication During Incidents
+
+Technical debugging is half the job. The other half is communication. Here's the communication framework I use:
+
+### The incident channel template
+
+Post updates every 15-30 minutes, even if nothing has changed:
+
+```markdown
+**Incident Update — 15:30 AEDT**
+
+**Status:** Investigating
+**Impact:** ~5% of checkout attempts failing with "Payment Error"
+**Duration:** Started ~14:45 AEDT (45 min ago)
+
+**What we know:**
+- Stripe is returning 402 errors for a subset of payment attempts
+- Affected users have cards issued by [specific bank]
+- No code deploys since 11:00
+
+**What we're doing:**
+- Checking Stripe status page and contacting support
+- Reviewing recent Stripe API changes
+- Testing with affected card types in staging
+
+**Next update:** 16:00 AEDT or sooner if status changes
+```
+
+### Who to notify and when
+
+| Severity | Notify | When |
+|----------|--------|------|
+| SEV1 (full outage) | Engineering lead, CTO, customer support, status page | Immediately |
+| SEV2 (major degradation) | Engineering lead, team lead, customer support | Within 15 minutes |
+| SEV3 (minor degradation) | Team channel | Within 30 minutes |
+| SEV4 (cosmetic/low impact) | Ticket created | Next business day |
+
+### The golden rule of incident communication
+
+**Never say "we're looking into it" without saying what you're looking into.** "We're investigating whether the recent Stripe API update caused checkout failures for AMEX cards" is 100x better than "we're investigating." Specificity builds trust.
+
+## Blameless Postmortems
+
+Every SEV1 and SEV2 incident gets a postmortem. The goal is learning, not blame. Here's the template I use:
+
+```markdown
+## Incident Postmortem: Checkout Payment Failures
+**Date:** 2026-02-26  
+**Duration:** 14:45 - 16:20 AEDT (95 minutes)  
+**Severity:** SEV2  
+**Author:** [Your name]  
+
+### Summary
+~5% of checkout payments failed due to a Stripe API behavior change 
+affecting 3DS authentication for cards from ANZ Bank.
+
+### Timeline
+- 14:45 — First error alerts fire in #alerts-payments
+- 14:52 — Engineer begins investigation  
+- 15:10 — Identified that only ANZ-issued cards are affected
+- 15:25 — Found Stripe changelog noting 3DS flow change
+- 15:40 — Hotfix deployed to handle new 3DS response format
+- 16:00 — Error rate returns to baseline
+- 16:20 — Incident resolved, monitoring confirmed
+
+### Root Cause
+Stripe changed the 3DS authentication response format for certain 
+card issuers. Our payment handler expected `three_d_secure.status` 
+but the new format uses `three_d_secure_result.status`. The code 
+fell through to the error handler.
+
+### What Went Well
+- Alerts fired within 5 minutes of first error
+- Team identified the affected user segment quickly
+- Hotfix was deployed within 50 minutes
+
+### What Could Be Better
+- We didn't monitor the Stripe changelog for breaking changes
+- Our payment handler didn't have a fallback for unknown response formats
+- Integration tests didn't cover 3DS edge cases
+
+### Action Items
+- [ ] Add Stripe changelog to weekly review (owner: @payments-team)
+- [ ] Add defensive parsing for Stripe responses (owner: @alice)
+- [ ] Expand payment integration test suite (owner: @bob)
+- [ ] Set up contract tests against Stripe's API (owner: @payments-team)
+```
+
+<Info>
+The most important section of a postmortem is "Action Items." If you write a postmortem without actionable follow-ups, it's just storytelling. Every item should have an owner and a deadline.
+</Info>
+
+## Building Debug-Friendly Systems
+
+The best debugging happens before the incident — by building systems that are easy to debug.
+
+### Structured logging from day one
+
+```tsx
+// Every log entry should have these fields
+logger.info('Payment processed', {
+  requestId: req.id,
+  traceId: req.traceId,
+  userId: user.id,
+  action: 'payment.process',
+  amount: payment.amount,
+  currency: payment.currency,
+  provider: 'stripe',
+  duration: Date.now() - startTime,
+  success: true,
+});
+```
+
+### Request tracing
+
+Generate a unique `traceId` at the edge and propagate it through every service. When something goes wrong, grep for the traceId and you have the complete request lifecycle across all services.
+
+### Health checks that mean something
+
+A health check that returns 200 when the database is down is worse than no health check. Test real dependencies:
+
+```tsx
+app.get('/health', async (req, res) => {
+  const checks = await Promise.allSettled([
+    db.query('SELECT 1'),
+    redis.ping(),
+    fetch('https://api.stripe.com/v1', { method: 'HEAD' }),
+  ]);
+
+  const status = checks.every(c => c.status === 'fulfilled') ? 200 : 503;
+  
+  res.status(status).json({
+    status: status === 200 ? 'healthy' : 'degraded',
+    checks: {
+      database: checks[0].status,
+      cache: checks[1].status,
+      stripe: checks[2].status,
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+```
+
+### Feature flags for everything
+
+Every feature should be behind a flag. Not because you're doing A/B testing — because you need a kill switch. When a feature causes a production issue, toggling a flag is 100x faster than deploying a revert.
+
+### Error boundaries with context
+
+In React applications, error boundaries should capture and report context:
+
+```tsx
+class ErrorBoundary extends React.Component<Props, State> {
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    reportError({
+      error,
+      componentStack: info.componentStack,
+      route: window.location.pathname,
+      userId: this.props.userId,
+      buildVersion: process.env.BUILD_VERSION,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <ErrorFallback error={this.state.error} />;
+    }
+    return this.props.children;
+  }
+}
+```
+
+## The Debugging Mindset
+
+After hundreds of production incidents, I've distilled my approach to a few principles:
+
+1. **Mitigate first, debug second.** Restore service as fast as possible. You can always investigate the root cause later.
+2. **Follow the data, not your intuition.** Your gut says "it's the database." The logs say it's a DNS issue. Trust the logs.
+3. **Eliminate possibilities systematically.** Don't jump to conclusions. Work through the checklist. Narrow down the layer, the time window, the code path.
+4. **Time-box your investigation.** If you've spent 30 minutes and haven't found the root cause, escalate. Fresh eyes find things tired eyes miss.
+5. **Write it down.** Every incident is a learning opportunity, but only if you capture the lessons. The postmortem is not optional.
+
+Production debugging is a skill that improves with practice. Every incident you handle makes you faster at the next one. The playbook helps, but experience is irreplaceable.

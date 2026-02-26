@@ -1,0 +1,516 @@
+---
+title: "From Demo to Production: Shipping AI Features"
+description: "The gap between an AI demo and a production feature is enormous — here's how to cross it."
+---
+
+# From Demo to Production: Shipping AI Features
+
+There's a moment in every AI project where the demo works beautifully. You show it to your team, they're impressed, someone says "ship it." Then reality hits.
+
+The demo ran on 5 carefully chosen inputs. Production gets 50,000 chaotic, unpredictable, adversarial inputs daily. The demo took 8 seconds and nobody minded. Production users bounce after 3. The demo cost a penny per request. Production costs $400/day and your finance team has questions.
+
+I've shipped AI features at MetaLabs, PromptLib, and Weel. Every single time, the gap between "working demo" and "production feature" was wider than I expected. Here's the field guide for crossing that gap.
+
+## Why Demos Lie
+
+A demo is a proof of concept running under ideal conditions. Here's what's different in production:
+
+**Input diversity**: Your demo used well-formed English sentences. Production gets typos, code-switching, emojis, 10-page pastes, empty strings, and deliberate prompt injection attempts.
+
+**Scale economics**: At 100 requests, cost is invisible. At 100,000 requests, it's a budget line item. The model that's "basically free" in demos becomes the most expensive service in your stack.
+
+**Latency composition**: The demo measured "LLM response time." Production measures the full chain — authentication, input validation, context retrieval, LLM inference, output parsing, caching, logging — and users experience the sum.
+
+**Error handling**: The demo crashed gracefully when you were watching. Production crashes at 3 AM when a user in Japan encounters a Unicode edge case in your prompt template.
+
+**Statefulness**: Demos are stateless. Production has user sessions, conversation history, cached results, concurrent requests, and race conditions.
+
+<Warning>
+If your AI feature works in a demo but you haven't stress-tested it with at least 500 diverse real-world inputs, you don't have a feature. You have a risk.
+</Warning>
+
+## Latency Budgets for AI Features
+
+Users have different latency expectations for different interactions. Map your AI feature to the right budget.
+
+| Interaction Type | Latency Budget | Example |
+|---|---|---|
+| Autocomplete / inline suggestions | < 200ms | Code completion, search suggestions |
+| Quick transformation | < 1s | Summarize selected text, classify an email |
+| Chat response (first token) | < 500ms | Customer support bot, coding assistant |
+| Chat response (full) | < 5s | Complex question answering |
+| Background processing | < 30s | Document analysis, report generation |
+| Async / queued | Minutes | Batch processing, long-form generation |
+
+### How to Hit Your Budget
+
+**Streaming**: For anything over 1 second, stream the response. Users perceive streaming as faster because they see progress. Time to first token (TTFT) is more important than total time.
+
+```typescript
+// Streaming response in Next.js
+import { OpenAI } from "openai";
+
+export async function POST(request: Request) {
+  const { message } = await request.json();
+  const openai = new OpenAI();
+
+  const stream = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: message }],
+    stream: true,
+  });
+
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content || "";
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }),
+    { headers: { "Content-Type": "text/event-stream" } }
+  );
+}
+```
+
+**Model selection**: GPT-4o-mini is 5-10x faster than GPT-4o. If the quality difference doesn't matter for your use case, use the faster model.
+
+**Parallel processing**: If you need to make multiple LLM calls, make them concurrently.
+
+```python
+import asyncio
+
+async def process_document(doc: str) -> dict:
+    summary_task = summarize(doc)
+    entities_task = extract_entities(doc)
+    sentiment_task = classify_sentiment(doc)
+
+    summary, entities, sentiment = await asyncio.gather(
+        summary_task, entities_task, sentiment_task
+    )
+
+    return {"summary": summary, "entities": entities, "sentiment": sentiment}
+```
+
+**Pre-computation**: Anything that can be computed ahead of time should be. Embed your knowledge base offline, not at query time. Precompute common prompts.
+
+## Error Handling and Fallbacks
+
+LLM APIs fail. Models produce unparseable output. Rate limits hit. Your system needs to handle all of this gracefully.
+
+### The Fallback Hierarchy
+
+```python
+async def ai_classify(text: str) -> Classification:
+    try:
+        result = await llm_classify(text, model="gpt-4o-mini")
+        if validate_output(result):
+            return result
+    except RateLimitError:
+        logger.warning("Primary model rate limited, falling back")
+    except TimeoutError:
+        logger.warning("Primary model timeout, falling back")
+    except Exception as e:
+        logger.error(f"Primary model error: {e}")
+
+    # Fallback 1: Try a different model
+    try:
+        result = await llm_classify(text, model="claude-3-haiku")
+        if validate_output(result):
+            return result
+    except Exception:
+        pass
+
+    # Fallback 2: Rule-based classification
+    result = rule_based_classify(text)
+    if result:
+        return result
+
+    # Fallback 3: Queue for human review
+    await queue_for_review(text)
+    return Classification(label="pending_review", confidence=0)
+```
+
+### What to Show Users When AI Fails
+
+Never show "An error occurred." Tell the user what happened and what they can do.
+
+```typescript
+function AIResultDisplay({ result, error }: Props) {
+  if (error?.type === "rate_limit") {
+    return (
+      <Banner variant="warning">
+        High demand right now. Your request is queued and will complete in about
+        30 seconds. <Button onClick={retry}>Try again</Button>
+      </Banner>
+    );
+  }
+
+  if (error?.type === "low_confidence") {
+    return (
+      <Banner variant="info">
+        I'm not confident in this answer. Here's my best attempt, but you may
+        want to verify: <em>{result.text}</em>
+        <Button onClick={escalateToHuman}>Get human help</Button>
+      </Banner>
+    );
+  }
+
+  if (error?.type === "timeout") {
+    return (
+      <Banner variant="error">
+        This is taking longer than expected. 
+        <Button onClick={retry}>Retry</Button> or{" "}
+        <Button onClick={useSimpler}>Try simplified version</Button>
+      </Banner>
+    );
+  }
+
+  return <AIResult data={result} />;
+}
+```
+
+<Tip>
+Design your error states before you design your happy path. Users forgive slow or imperfect AI. They don't forgive AI that fails silently or produces garbage without warning.
+</Tip>
+
+## Streaming UX Patterns
+
+Streaming changes how users interact with AI features. Here are patterns I've found effective.
+
+### Progressive Rendering
+
+Don't just dump streaming text into a container. Structure the rendering.
+
+```typescript
+function StreamingResponse({ stream }: { stream: AsyncIterable<string> }) {
+  const [chunks, setChunks] = useState<string[]>([]);
+  const [isComplete, setIsComplete] = useState(false);
+
+  useEffect(() => {
+    let buffer = "";
+    (async () => {
+      for await (const chunk of stream) {
+        buffer += chunk;
+        setChunks(prev => [...prev, chunk]);
+      }
+      setIsComplete(true);
+    })();
+  }, [stream]);
+
+  return (
+    <div className="relative">
+      <div className="prose">
+        <Markdown>{chunks.join("")}</Markdown>
+      </div>
+      {!isComplete && <TypingIndicator />}
+      {isComplete && (
+        <div className="mt-4 flex gap-2">
+          <CopyButton text={chunks.join("")} />
+          <FeedbackButtons />
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### Show Confidence During Streaming
+
+If your system has a retrieval step, show the sources while the answer is being generated.
+
+```
+[Finding relevant sources...]
+→ Found 3 matching documents
+→ Using: pricing-guide.md, faq.md
+
+[Generating answer...]
+Based on our pricing guide, the annual plan costs...
+```
+
+### Cancellation
+
+Users should be able to cancel a streaming response. This saves tokens and money.
+
+```typescript
+const controller = new AbortController();
+
+const stream = await openai.chat.completions.create(
+  { model: "gpt-4o", messages, stream: true },
+  { signal: controller.signal }
+);
+
+// On user cancel:
+controller.abort();
+```
+
+## Cost Management at Scale
+
+This is the section that would have saved me the most money if I'd read it two years ago.
+
+### Know Your Unit Economics
+
+For every AI feature, calculate:
+
+```
+Cost per request = (input_tokens × input_price) + (output_tokens × output_price) + infrastructure
+
+Daily cost = cost_per_request × daily_requests
+Monthly cost = daily_cost × 30
+Annual cost = monthly_cost × 12
+```
+
+Example for a support chatbot:
+
+```
+Average input: 800 tokens (system prompt + context + user message)
+Average output: 200 tokens
+Model: GPT-4o-mini ($0.15/1M input, $0.60/1M output)
+
+Cost per request: (800 × $0.00000015) + (200 × $0.0000006) = $0.00024
+At 10K requests/day: $2.40/day → $72/month
+At 100K requests/day: $24/day → $720/month
+```
+
+### Cost Reduction Strategies
+
+**1. Cache aggressively**
+
+```python
+import hashlib
+
+def get_cached_response(prompt: str, ttl_hours: int = 24) -> str | None:
+    cache_key = hashlib.sha256(prompt.encode()).hexdigest()
+    cached = redis.get(f"llm:cache:{cache_key}")
+    if cached:
+        metrics.increment("llm.cache.hit")
+        return cached
+    metrics.increment("llm.cache.miss")
+    return None
+
+def cache_response(prompt: str, response: str, ttl_hours: int = 24):
+    cache_key = hashlib.sha256(prompt.encode()).hexdigest()
+    redis.setex(f"llm:cache:{cache_key}", ttl_hours * 3600, response)
+```
+
+In my experience, LLM response caching hits 15-30% for support and FAQ use cases. That's 15-30% cost savings for an hour of implementation.
+
+**2. Use the cheapest model that meets your quality bar**
+
+Don't default to GPT-4o. Start with GPT-4o-mini. Test if the quality is acceptable. Only upgrade when you can demonstrate the bigger model is meaningfully better on your eval set.
+
+**3. Minimize context tokens**
+
+Every token in your system prompt costs money on every request. Audit your prompts regularly. Remove verbose instructions, compress few-shot examples, truncate unnecessary context.
+
+```python
+# Before: 2000 token system prompt
+# After: 800 token system prompt
+# Savings at 100K requests/day: ~$5/day
+```
+
+**4. Smart batching for non-interactive tasks**
+
+```python
+async def batch_classify(items: list[str], batch_size: int = 10) -> list:
+    prompt = "Classify each of the following items:\n"
+    for i, item in enumerate(items[:batch_size]):
+        prompt += f"{i+1}. {item}\n"
+    prompt += "\nReturn JSON array of classifications."
+
+    response = await llm.generate(prompt)
+    return json.loads(response)
+```
+
+### Rate Limiting
+
+Protect your budget and your API quotas.
+
+```python
+from slowapi import Limiter
+
+limiter = Limiter(key_func=get_user_id)
+
+@app.post("/api/ai/chat")
+@limiter.limit("20/minute")      # Per user
+@limiter.limit("1000/hour")      # Global
+async def chat(request: Request):
+    ...
+```
+
+Set per-user and global limits. Alert when you're approaching your API provider's rate limits. Nothing kills user experience like 429 errors.
+
+## Feature Flags for AI
+
+AI features should be behind feature flags. Always. No exceptions.
+
+```typescript
+async function getAISummary(document: string): Promise<Summary> {
+  const flags = await getFeatureFlags(userId);
+
+  if (!flags.ai_summary_enabled) {
+    return generateRuleSummary(document);  // non-AI fallback
+  }
+
+  const model = flags.ai_summary_model || "gpt-4o-mini";
+  const promptVersion = flags.ai_summary_prompt_version || "v2.1";
+
+  return generateAISummary(document, { model, promptVersion });
+}
+```
+
+Feature flags let you:
+- **Gradual rollout**: 1% → 10% → 50% → 100% with monitoring at each step
+- **Instant rollback**: Model misbehaving? Kill the flag, users get the fallback
+- **A/B testing**: Route traffic to different models or prompt versions
+- **Cost control**: Disable AI for free-tier users during cost spikes
+
+## Monitoring and Observability
+
+You need to see what your AI features are doing in production. Here's my monitoring stack.
+
+### Structured Logging
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+async def ai_request(input_text: str, user_id: str) -> str:
+    start = time.monotonic()
+
+    response = await llm.generate(input_text)
+
+    duration_ms = (time.monotonic() - start) * 1000
+
+    logger.info("ai_request",
+        user_id=user_id,
+        model=response.model,
+        input_tokens=response.usage.prompt_tokens,
+        output_tokens=response.usage.completion_tokens,
+        duration_ms=duration_ms,
+        prompt_version="v2.3",
+        cache_hit=False,
+    )
+
+    return response.text
+```
+
+### Dashboards I Run
+
+1. **Request volume**: Requests per minute, broken down by feature
+2. **Latency**: P50, P95, P99 with alerts on sudden increases
+3. **Error rate**: By error type (timeout, rate limit, parse failure, model error)
+4. **Cost**: Daily spend by model, by feature, by user tier
+5. **Quality**: Sampled LLM-as-judge scores, user feedback (thumbs up/down)
+6. **Token usage**: Average input/output tokens per request — catches prompt bloat
+
+### Alerts That Matter
+
+- Cost exceeds daily budget by 20%
+- Error rate exceeds 5% over 15-minute window
+- P95 latency exceeds 2x normal baseline
+- LLM-as-judge quality score drops below threshold
+- Token usage spikes (indicates prompt or input changes)
+
+## User Trust and Transparency
+
+Users don't trust AI by default, and they shouldn't. Building trust requires deliberate design choices.
+
+### Show Your Work
+
+When the AI provides information, show where it came from.
+
+```
+Based on your pricing guide (last updated Jan 2025):
+Annual plans start at $99/month billed yearly.
+
+Sources: pricing-guide.md, faq.md (sections: "Annual Billing", "Plan Comparison")
+```
+
+### Communicate Uncertainty
+
+Don't present every AI output with equal confidence.
+
+```typescript
+interface AIResponse {
+  text: string;
+  confidence: "high" | "medium" | "low";
+  sources: Source[];
+}
+
+function renderResponse(response: AIResponse) {
+  return (
+    <>
+      {response.confidence === "low" && (
+        <InfoBanner>
+          This answer may be incomplete. Consider verifying with our support team.
+        </InfoBanner>
+      )}
+      <ResponseText>{response.text}</ResponseText>
+      <SourceList sources={response.sources} />
+    </>
+  );
+}
+```
+
+### Feedback Loops
+
+Every AI output should have a feedback mechanism. Thumbs up/down is the minimum.
+
+```typescript
+<div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
+  <span>Was this helpful?</span>
+  <button onClick={() => submitFeedback("positive")}>👍</button>
+  <button onClick={() => submitFeedback("negative")}>👎</button>
+  <button onClick={() => setShowDetails(true)}>Tell us more</button>
+</div>
+```
+
+The feedback serves two purposes: it builds your eval dataset from real user judgments, and it makes users feel heard — which builds trust even when the AI is wrong.
+
+## Gradual Rollout Strategy
+
+Here's the rollout plan I use for every AI feature:
+
+### Phase 1: Shadow Mode (1-2 weeks)
+Run the AI feature in parallel with the existing system. Log AI outputs but don't show them to users. Compare AI outputs to existing outputs. Measure quality, latency, cost.
+
+### Phase 2: Internal Dogfood (1 week)
+Enable for your team. Get feedback on quality, UX, edge cases. Fix the obvious issues.
+
+### Phase 3: Beta with Opt-In (2-4 weeks)
+Enable for power users or beta testers. Monitor closely. Collect feedback aggressively. This is where you find the edge cases your eval set missed.
+
+### Phase 4: Gradual Rollout (2-4 weeks)
+1% → 10% → 50% → 100%. At each step, compare quality and user metrics between the AI group and the control group. If metrics regress, pause and investigate.
+
+### Phase 5: Production with Monitoring
+Feature is live for everyone. Monitoring dashboards running. Weekly eval suite runs. Prompt versioning in place. On-call knows how to disable the feature if something goes wrong.
+
+<Info>
+This process feels slow. It's not. It's the fastest way to ship an AI feature that you don't have to emergency-revert at 2 AM. I've learned this the expensive way.
+</Info>
+
+## Lessons from Shipping
+
+These are the things I wish I'd known before shipping my first AI feature:
+
+1. **Budget 3x the time you expect** for going from demo to production. The last 20% takes 80% of the time.
+
+2. **Your prompt will change monthly**. Design for that. Prompts outside of code, versioning, instant rollback.
+
+3. **Users will find ways to break it you never imagined**. Adversarial testing is not optional.
+
+4. **Cost surprises are the most common "production incident"** for AI features. Monitor cost from day one, not after the first bill.
+
+5. **The best AI feature is the one users forget is AI**. If it's reliable, fast, and transparent, they stop thinking about the technology and just use the tool.
+
+6. **Fallbacks are not failure**. A system that gracefully falls back to a simpler approach is better than one that fails spectacularly.
+
+The gap between demo and production is real, but it's crossable. It just takes the same engineering discipline we apply to everything else — testing, monitoring, gradual rollout, and the humility to know that our system will be wrong sometimes and to plan for that.

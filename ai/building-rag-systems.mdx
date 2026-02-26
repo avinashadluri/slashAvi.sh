@@ -1,0 +1,415 @@
+---
+title: "Building RAG Systems That Don't Suck"
+description: "Practical patterns for retrieval-augmented generation — chunking, embedding, retrieval, and the mistakes everyone makes."
+---
+
+# Building RAG Systems That Don't Suck
+
+I've built RAG systems for three different products now — PromptLib, internal tools at Weel, and experimental features in Thinki.sh. Every single time, the first version was terrible. Not "needs polish" terrible. "Confidently wrong answers from your own data" terrible.
+
+The gap between a RAG demo and a RAG system that users trust is enormous. Most tutorials skip the hard parts. This is the guide I wish I'd had.
+
+## Why Naive RAG Fails
+
+The standard RAG tutorial goes like this: chunk your documents, embed them, store in a vector database, retrieve top-k results, stuff them into a prompt. Ship it.
+
+Here's what actually happens:
+
+- The chunking splits a critical paragraph across two chunks, and neither makes sense alone
+- The embedding model thinks "bank" (financial) and "bank" (river) are the same thing in your domain
+- Top-k retrieval returns five vaguely related chunks instead of the one that actually answers the question
+- The LLM hallucinates an answer that sounds plausible but contradicts your source material
+- The user loses trust, and you've just built a liability
+
+Naive RAG has a fundamental problem: it treats retrieval as a solved problem and focuses all attention on the generation step. In practice, retrieval quality is 80% of the battle.
+
+<Warning>
+If your retrieval is bad, no amount of prompt engineering will save you. Fix retrieval first, always.
+</Warning>
+
+## Chunking: The Foundation Everyone Gets Wrong
+
+Chunking is the most underrated part of RAG. Get it wrong and everything downstream suffers. I've tried every strategy and here's what I've learned.
+
+### Fixed-Size Chunking
+
+Split documents into chunks of N tokens with M tokens of overlap.
+
+```python
+def fixed_chunk(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]:
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+```
+
+**When to use it**: Unstructured text where you don't have reliable section boundaries. It's the baseline — predictable, fast, and easy to debug.
+
+**The catch**: It doesn't respect semantic boundaries. A sentence about pricing might end up split across two chunks, with the first half in one and the second in another.
+
+### Recursive/Hierarchical Chunking
+
+Split on natural boundaries — first by sections (`##`), then by paragraphs (`\n\n`), then by sentences, then by token count as a fallback.
+
+```python
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+    separators=["\n## ", "\n\n", "\n", ". ", " "]
+)
+chunks = splitter.split_text(document)
+```
+
+This is my default for most use cases. It respects document structure, which means chunks are more likely to be self-contained units of meaning.
+
+### Semantic Chunking
+
+Use an embedding model to detect topic shifts and split at semantic boundaries.
+
+```python
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_openai import OpenAIEmbeddings
+
+chunker = SemanticChunker(
+    OpenAIEmbeddings(),
+    breakpoint_threshold_type="percentile"
+)
+chunks = chunker.create_documents([document])
+```
+
+**When to use it**: Long-form content where topics shift without clear formatting signals. Technical documentation, research papers, meeting transcripts.
+
+**The catch**: It's slower, more expensive (you're embedding during chunking), and can be unpredictable. I've seen it create chunks that are 50 tokens and chunks that are 3000 tokens in the same document.
+
+### My Recommendation
+
+| Content Type | Strategy | Chunk Size | Overlap |
+|---|---|---|---|
+| Structured docs (markdown, HTML) | Recursive | 800-1200 tokens | 200 tokens |
+| Unstructured text | Fixed with overlap | 512 tokens | 64 tokens |
+| Code | AST-aware splitting | Function/class level | Include imports |
+| Conversations/transcripts | Semantic | Variable | N/A |
+
+<Tip>
+Always include metadata with your chunks — source document, section title, page number, timestamp. You'll need this for citations, filtering, and debugging retrieval issues.
+</Tip>
+
+## Embedding Model Selection
+
+The embedding model is your semantic search engine. Pick the wrong one and your retrieval will be confidently irrelevant.
+
+### What I've Used in Production
+
+**OpenAI `text-embedding-3-small`**: My default for most projects. Good quality, cheap ($0.02/1M tokens), 1536 dimensions. The `small` model is genuinely good enough for 90% of use cases.
+
+**OpenAI `text-embedding-3-large`**: When you need that extra retrieval quality and can afford 3072 dimensions. I use this for legal/compliance documents where precision matters.
+
+**Cohere `embed-v3`**: Excellent for multilingual content and has built-in search optimization. Their compression to 256 dimensions with minimal quality loss is impressive.
+
+**Local options (`nomic-embed-text`, `bge-large`)**: For privacy-sensitive workloads or when you need to avoid API costs at scale. Run them via Ollama and they're surprisingly competitive.
+
+```bash
+# Running a local embedding model
+ollama pull nomic-embed-text
+```
+
+```python
+import ollama
+
+response = ollama.embeddings(
+    model="nomic-embed-text",
+    prompt="Your text to embed"
+)
+embedding = response["embedding"]  # 768 dimensions
+```
+
+### The Dimension Trade-off
+
+More dimensions = better semantic resolution = more storage and slower search. Here's what I've found in practice:
+
+| Model | Dimensions | Quality (MTEB) | Cost | My Take |
+|---|---|---|---|---|
+| `text-embedding-3-small` | 1536 | Good | $0.02/1M tokens | Default choice |
+| `text-embedding-3-large` | 3072 | Better | $0.13/1M tokens | High-precision needs |
+| `nomic-embed-text` | 768 | Good | Free (local) | Privacy-first |
+| Cohere `embed-v3` | 1024 | Great | $0.10/1M tokens | Multilingual |
+
+<Warning>
+Never mix embedding models in the same index. If you switch models, you must re-embed everything. Plan for this from day one.
+</Warning>
+
+## Vector Database Choices
+
+I've used three vector databases in production. Here's the honest take.
+
+### pgvector (PostgreSQL Extension)
+
+If you're already running Postgres — and let's be honest, you probably are — pgvector is the pragmatic choice.
+
+```sql
+CREATE EXTENSION vector;
+
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    metadata JSONB,
+    embedding vector(1536)
+);
+
+CREATE INDEX ON documents
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100);
+
+-- Query
+SELECT content, metadata,
+    1 - (embedding <=> $1::vector) AS similarity
+FROM documents
+ORDER BY embedding <=> $1::vector
+LIMIT 5;
+```
+
+**Pros**: No new infrastructure, ACID transactions, you can join embeddings with your relational data, familiar tooling.
+
+**Cons**: Performance degrades past ~1M vectors without careful tuning. HNSW indexes help but add memory overhead.
+
+**My verdict**: Start here. You can always migrate later, and you probably won't need to.
+
+### Pinecone
+
+Managed vector database. Zero ops, scales automatically, good developer experience.
+
+```python
+from pinecone import Pinecone
+
+pc = Pinecone(api_key="your-key")
+index = pc.Index("my-index")
+
+index.upsert(vectors=[
+    {"id": "doc1", "values": embedding, "metadata": {"source": "guide.md"}}
+])
+
+results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
+```
+
+**Pros**: Zero infrastructure management, fast at scale, good filtering support.
+
+**Cons**: Vendor lock-in, cost adds up quickly at scale, can't inspect the index easily for debugging.
+
+### Weaviate
+
+Full-featured vector database with hybrid search built in.
+
+**Pros**: Hybrid search (vector + keyword) out of the box, GraphQL API, good for complex queries.
+
+**Cons**: More operational overhead than Pinecone, steeper learning curve.
+
+### My Decision Framework
+
+- **< 100K documents, already on Postgres**: pgvector, no question
+- **100K-10M documents, want zero ops**: Pinecone
+- **Need hybrid search as a first-class feature**: Weaviate
+- **Privacy-first, self-hosted requirement**: Weaviate or Qdrant
+
+## Retrieval Quality: The 80% Problem
+
+Getting documents into a vector store is the easy part. Getting the *right* documents out is where most RAG systems fail.
+
+### Beyond Naive Top-K
+
+Basic cosine similarity search returns the K most similar chunks. The problem is that "most similar" and "most useful for answering this question" are different things.
+
+I measure retrieval quality with three metrics:
+
+- **Recall@K**: Of all relevant chunks, how many did we retrieve in the top K?
+- **Precision@K**: Of the K chunks we retrieved, how many are actually relevant?
+- **MRR (Mean Reciprocal Rank)**: How high up is the first relevant result?
+
+### Re-Ranking: The Biggest Bang for Your Buck
+
+A re-ranker takes your initial retrieval results and re-orders them using a more expensive but more accurate model. This is the single most impactful improvement I've made to any RAG system.
+
+```python
+from cohere import Client
+
+co = Client(api_key="your-key")
+
+results = co.rerank(
+    model="rerank-v3.5",
+    query="How do I handle rate limiting?",
+    documents=[chunk.text for chunk in initial_results],
+    top_n=3
+)
+
+reranked_chunks = [initial_results[r.index] for r in results.results]
+```
+
+The pattern is: retrieve 20-30 candidates with fast vector search, then re-rank to the top 3-5 with a cross-encoder. This consistently improved answer quality by 20-30% in my testing.
+
+### Hybrid Search: Keywords + Semantics
+
+Pure vector search misses exact matches. If someone searches for "error code E4021", semantic search might return chunks about error handling in general. You need keyword search for precision.
+
+```python
+# Hybrid search with reciprocal rank fusion
+def hybrid_search(query: str, alpha: float = 0.7) -> list:
+    vector_results = vector_search(query, top_k=20)
+    keyword_results = bm25_search(query, top_k=20)
+
+    scores = {}
+    for rank, doc in enumerate(vector_results):
+        scores[doc.id] = scores.get(doc.id, 0) + alpha * (1 / (rank + 60))
+    for rank, doc in enumerate(keyword_results):
+        scores[doc.id] = scores.get(doc.id, 0) + (1 - alpha) * (1 / (rank + 60))
+
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+```
+
+<Tip>
+Start with alpha=0.7 (70% semantic, 30% keyword) and tune from there. For technical documentation with lots of specific terms, I often push keyword weight higher.
+</Tip>
+
+### Query Transformation
+
+Sometimes the user's query isn't a good search query. A question like "what went wrong with the deployment last Tuesday" is natural language but terrible for retrieval.
+
+Techniques that work:
+
+1. **HyDE (Hypothetical Document Embeddings)**: Ask the LLM to write a hypothetical answer, then use that as the search query. The embedding of a good answer is closer to relevant documents than the embedding of a question.
+
+2. **Query decomposition**: Break complex questions into sub-queries. "Compare our pricing model with competitors" becomes two searches.
+
+3. **Query expansion**: Add synonyms or related terms. Use the LLM for this — it's good at it.
+
+```python
+def hyde_search(question: str) -> list:
+    hypothetical_answer = llm.generate(
+        f"Write a short paragraph that would answer this question: {question}"
+    )
+    embedding = embed(hypothetical_answer)
+    return vector_search(embedding, top_k=10)
+```
+
+## Prompt Construction with Context
+
+You've retrieved good chunks. Now you need to construct a prompt that helps the LLM use them effectively.
+
+```python
+def build_rag_prompt(question: str, chunks: list[str]) -> str:
+    context = "\n\n---\n\n".join(
+        f"[Source {i+1}]: {chunk}" for i, chunk in enumerate(chunks)
+    )
+
+    return f"""Answer the user's question based on the provided context.
+If the context doesn't contain enough information to answer fully,
+say what you can answer and what's missing.
+Cite sources using [Source N] notation.
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:"""
+```
+
+Key principles:
+- **Number your sources** so the LLM can cite them
+- **Instruct the model to say "I don't know"** when context is insufficient — this prevents hallucination
+- **Put context before the question** — models attend better to information near the end of the prompt
+- **Separate chunks clearly** with delimiters so the model doesn't blend information from different sources
+
+## Evaluation: How to Know It's Working
+
+This is where most teams skip and then wonder why production quality is terrible.
+
+### Build an Eval Dataset
+
+Start with 50-100 question-answer pairs where you know the correct answer and which source documents contain it.
+
+```python
+eval_dataset = [
+    {
+        "question": "What is the refund policy for annual plans?",
+        "expected_answer": "Annual plans can be refunded within 30 days...",
+        "relevant_doc_ids": ["policy-doc-42", "faq-doc-7"]
+    },
+    # ... more examples
+]
+```
+
+### Metrics That Matter
+
+- **Retrieval recall**: Did we find the right documents?
+- **Answer faithfulness**: Is the answer supported by the retrieved context? (No hallucination)
+- **Answer relevance**: Does the answer actually address the question?
+- **Answer correctness**: Is the answer factually right?
+
+I use RAGAS for automated evaluation and manual review for the first 100 production queries.
+
+```python
+from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevancy, context_recall
+
+result = evaluate(
+    dataset=eval_dataset,
+    metrics=[faithfulness, answer_relevancy, context_recall]
+)
+print(result)
+```
+
+## Production Gotchas
+
+Things that bit me that no tutorial mentioned:
+
+**Stale embeddings**: Your source documents change, but your embeddings don't. Build a pipeline that detects changes and re-embeds. I use content hashes to track this.
+
+**Token budget management**: With GPT-4, stuffing 10 chunks into context gets expensive fast. I budget 2000-3000 tokens for context and use re-ranking to pick the best 3-5 chunks.
+
+**Latency**: Embedding → search → re-rank → generate is a chain. Each step adds latency. In production, my target is under 3 seconds total. Parallel where you can (embed query while fetching user context, for example).
+
+**The "I found something" problem**: The LLM will almost always generate an answer from retrieved context, even when the context is irrelevant. Explicit instructions to abstain are necessary but not sufficient — you need a confidence threshold on retrieval similarity scores.
+
+## Cost Optimization
+
+RAG costs add up in three places:
+
+1. **Embedding**: One-time cost for ingestion, ongoing for queries. Use `text-embedding-3-small` unless you have a reason not to.
+2. **Vector storage**: pgvector is free (you're paying for Postgres anyway). Managed services charge per vector per month.
+3. **Generation**: The big one. Context tokens are input tokens, which are cheaper than output, but they add up.
+
+```
+Cost per query (approximate):
+- Embedding query: ~$0.00001
+- Vector search: ~$0.0001 (managed) / ~$0 (pgvector)
+- Re-ranking: ~$0.002
+- Generation (GPT-4o with 3K context): ~$0.01
+- Total: ~$0.012 per query
+```
+
+At 10K queries/day, that's ~$120/day or ~$3,600/month. Plan for this.
+
+<Tip>
+Cache aggressively. If the same question comes in twice, serve the cached answer. I use a semantic cache — embed the query, check if a similar query was answered recently, and serve that if the similarity is above 0.95.
+</Tip>
+
+## The RAG Checklist
+
+Before you ship, verify:
+
+- [ ] Chunks are self-contained and include metadata
+- [ ] Embedding model matches between indexing and query time
+- [ ] Retrieval recall is above 80% on your eval set
+- [ ] Re-ranking is in place (even a simple one helps)
+- [ ] The prompt instructs the model to cite sources and abstain when unsure
+- [ ] You have an eval dataset with at least 50 examples
+- [ ] Stale document detection and re-embedding pipeline exists
+- [ ] Latency is under your budget (I target 3 seconds)
+- [ ] Cost per query is calculated and within budget
+- [ ] Monitoring is in place for retrieval quality degradation
+
+RAG isn't glamorous. It's plumbing. But good plumbing is the difference between an AI feature users love and one they learn to ignore.

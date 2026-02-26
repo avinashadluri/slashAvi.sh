@@ -1,0 +1,386 @@
+---
+title: "Performance Budgets That Actually Work"
+description: "How to set, enforce, and maintain web performance budgets without losing your team's trust."
+---
+
+# Performance Budgets That Actually Work
+
+I've implemented performance budgets at three different companies. Twice they failed. The third time — at Weel — they stuck. The difference wasn't tooling or metrics. It was approach.
+
+Most performance budgets fail not because teams don't care about performance, but because the budgets are set by someone in a room, announced via Slack, and enforced with a CI gate that blocks PRs. Engineers hit the gate, get frustrated, and someone with authority overrides it. Within a month, the budget is an ignored warning. Within three months, it's removed.
+
+Here's how to do it differently.
+
+## Why Most Performance Budgets Fail
+
+Let me be specific about the failure modes:
+
+**1. Budgets are aspirational, not realistic.** Someone reads a Google article saying LCP should be under 2.5s, sets that as the budget, and the current LCP is 4.2s. Every PR is now blocked. The budget becomes the enemy.
+
+**2. Budgets lack context.** A blanket "JavaScript bundle under 200KB" ignores that the checkout page genuinely needs a payment SDK that's 80KB alone. Teams see the budget as uninformed and lose trust in the system.
+
+**3. No one owns it.** The person who set the budget moves to another project. No one updates the thresholds. No one triages regressions. The budget becomes stale.
+
+**4. Enforcement is all-or-nothing.** The CI check is green or red. There's no "you're trending in the wrong direction" — just pass/fail. Teams feel ambushed when a PR pushes them over the line.
+
+## Setting Realistic Budgets
+
+The process matters as much as the numbers. Here's my approach:
+
+### Step 1: Measure where you actually are
+
+Before setting any budget, run four weeks of real-user monitoring (RUM) data collection. Not lab data — real data from real users on real devices and networks.
+
+```bash
+# If you're starting from zero, Core Web Vitals from CrUX is free
+# Pull your domain's data from the Chrome UX Report
+npx web-vitals-reporter --origin https://yoursite.com
+```
+
+Look at **p75 values**, not averages. Averages hide the long tail where your worst-performing users live.
+
+### Step 2: Set budgets relative to current state
+
+This is where most teams go wrong. Don't set budgets at "industry best practice." Set them at your current p75 + a regression threshold.
+
+| Metric | Current p75 | Budget (no-regression) | Stretch Goal (6 months) |
+|--------|-------------|----------------------|------------------------|
+| LCP | 3.8s | 4.0s | 2.5s |
+| CLS | 0.15 | 0.18 | 0.1 |
+| INP | 280ms | 300ms | 200ms |
+| JS Bundle (main) | 245KB | 260KB | 200KB |
+| Total Transfer | 1.8MB | 2.0MB | 1.2MB |
+
+The "no-regression" column is your CI gate. It exists to prevent things from getting *worse*, not to force improvement. The "stretch goal" is your quarterly objective — improvement happens through dedicated performance work, not by blocking feature PRs.
+
+<Tip>
+Frame the no-regression budget as "we're protecting the investment we've already made in performance." This lands much better with teams than "you must make things faster."
+</Tip>
+
+### Step 3: Budget per route, not globally
+
+A global bundle budget is meaningless when your marketing site and your admin dashboard have different needs. Set budgets per critical user journey:
+
+```json
+{
+  "budgets": [
+    {
+      "path": "/",
+      "lcp": 2500,
+      "cls": 0.1,
+      "jsBundle": 150000
+    },
+    {
+      "path": "/dashboard",
+      "lcp": 3500,
+      "cls": 0.15,
+      "jsBundle": 300000
+    },
+    {
+      "path": "/checkout",
+      "lcp": 2000,
+      "cls": 0.05,
+      "jsBundle": 200000
+    }
+  ]
+}
+```
+
+Checkout pages need tight CLS budgets (layout shifts during payment are conversion killers). Dashboards can afford larger bundles. Your landing page needs the fastest LCP.
+
+## The Tooling Stack
+
+Here's what I've found actually works in production CI/CD pipelines.
+
+### Bundle size enforcement
+
+**bundlesize** or **size-limit** in CI catches JavaScript bundle regressions before they ship.
+
+```json
+// package.json
+{
+  "size-limit": [
+    {
+      "path": "dist/client/main-*.js",
+      "limit": "250 KB",
+      "gzip": true
+    },
+    {
+      "path": "dist/client/vendor-*.js",
+      "limit": "150 KB",
+      "gzip": true
+    },
+    {
+      "path": "dist/client/**/*.css",
+      "limit": "50 KB",
+      "gzip": true
+    }
+  ]
+}
+```
+
+```yaml
+# GitHub Actions
+- name: Check bundle size
+  uses: andresz1/size-limit-action@v1
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    skip_step: build
+```
+
+This posts a comment on every PR showing the bundle size delta. Engineers see the impact of their changes before merge. No surprises.
+
+### Lighthouse CI for synthetic testing
+
+Lighthouse CI runs in your pipeline and tracks scores over time. The key is running it against a **realistic staging environment**, not localhost.
+
+```js
+// lighthouserc.js
+module.exports = {
+  ci: {
+    collect: {
+      url: [
+        'https://staging.yourapp.com/',
+        'https://staging.yourapp.com/dashboard',
+        'https://staging.yourapp.com/checkout',
+      ],
+      numberOfRuns: 3,
+    },
+    assert: {
+      assertions: {
+        'largest-contentful-paint': ['warn', { maxNumericValue: 4000 }],
+        'cumulative-layout-shift': ['error', { maxNumericValue: 0.18 }],
+        'total-byte-weight': ['warn', { maxNumericValue: 2000000 }],
+        'interactive': ['warn', { maxNumericValue: 5000 }],
+      },
+    },
+    upload: {
+      target: 'lhci',
+      serverBaseUrl: 'https://lhci.yourcompany.com',
+    },
+  },
+};
+```
+
+Notice I use `warn` for most metrics and `error` only for CLS. Warnings surface in the PR but don't block merge. This is intentional — the goal is awareness, not gatekeeping.
+
+### webpack-bundle-analyzer for investigation
+
+When bundle size increases, you need to understand *why*. Run the analyzer locally to visualize what's in your bundles.
+
+```bash
+# Generate stats
+ANALYZE=true npm run build
+
+# Or directly
+npx webpack-bundle-analyzer dist/stats.json
+```
+
+The treemap visualization makes it immediately obvious when someone imports all of `lodash` instead of `lodash/debounce`, or when a server-only dependency ends up in the client bundle.
+
+<Warning>
+Don't rely solely on lab testing (Lighthouse). Lab data tells you about potential issues. Real User Monitoring (RUM) tells you about actual user experience. You need both.
+</Warning>
+
+## Integrating Into CI/CD Without Blocking Everything
+
+The integration strategy is where political skill matters as much as technical skill.
+
+### The three-tier approach
+
+**Tier 1 — Hard blocks (errors):** Only metrics where regressions directly impact revenue or accessibility. For most teams, this is CLS on checkout/payment flows and critical bundle size limits.
+
+**Tier 2 — Soft warnings:** Most performance metrics live here. The CI check is yellow, not red. A bot comments on the PR with the regression. The author and reviewer are aware but can merge.
+
+**Tier 3 — Dashboard monitoring:** Long-term trends tracked in Grafana or Datadog. Weekly reports to the team. Quarterly goals. This is where LCP improvements and INP optimization live.
+
+```yaml
+# Example GitHub Actions workflow
+name: Performance Checks
+on: [pull_request]
+
+jobs:
+  bundle-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+      - uses: andresz1/size-limit-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    needs: deploy-preview
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Lighthouse
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          configPath: ./lighthouserc.js
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+```
+
+### The "performance tax" window
+
+Every quarter, dedicate one sprint to performance work. This is when you tighten budgets, address accumulated warnings, and invest in improvements. Frame it as "paying down performance debt" — leadership understands debt metaphors.
+
+During this sprint:
+1. Review three months of RUM data
+2. Identify the top 3 regressions
+3. Tighten no-regression budgets to current (improved) baselines
+4. Set the next stretch goals
+
+## Performance Culture vs Performance Police
+
+This is the hardest part. I spent a year at one company being the "performance police" — the person who blocked PRs, wrote Slack messages about regressions, and generally made people feel bad about their code. It didn't work. Performance got marginally better while team morale got significantly worse.
+
+What works is building a performance **culture**:
+
+### Make performance visible
+
+Put a Core Web Vitals dashboard on the office TV (or the team's Slack channel). Not as a shame board — as ambient awareness. When people see LCP trending up after a deploy, they investigate voluntarily.
+
+### Celebrate improvements
+
+When someone reduces bundle size by 30KB, that's worth mentioning in standup. When a team improves their LCP by 500ms, that's a Slack post with champagne emojis. Positive reinforcement works better than gatekeeping.
+
+### Teach, don't enforce
+
+Instead of blocking a PR because someone imported `moment.js`, comment with:
+
+> *"Heads up — `moment` adds 67KB gzipped to our bundle. `date-fns/format` does the same thing at 2KB. Here's how to swap it: [link to guide]. Not blocking this PR, but would love to see the switch in a follow-up."*
+
+That comment teaches. The engineer learns something. They'll make the right choice next time without anyone having to enforce anything.
+
+### Distribute ownership
+
+Don't have one "performance person." Every team owns the performance of their routes. Provide them with dashboards, budgets, and tools. Review performance in sprint retros, not in cross-team performance reviews.
+
+## Real Numbers From Production
+
+Let me share concrete numbers from a performance budget program I ran. These are from a B2B SaaS dashboard application with ~50K daily active users.
+
+**Before budgets (baseline):**
+- LCP p75: 4.2s
+- CLS p75: 0.22
+- INP p75: 340ms
+- Main JS bundle: 380KB gzipped
+- Largest dependency: `@mui/material` at 92KB gzipped
+
+**After 6 months of budgets + quarterly perf sprints:**
+- LCP p75: 2.8s (-33%)
+- CLS p75: 0.08 (-64%)
+- INP p75: 180ms (-47%)
+- Main JS bundle: 210KB gzipped (-45%)
+- Tree-shook MUI, lazy-loaded heavy routes, replaced moment with date-fns
+
+**After 12 months:**
+- LCP p75: 2.1s (-50% from baseline)
+- CLS p75: 0.04 (-82%)
+- INP p75: 120ms (-65%)
+- Main JS bundle: 185KB gzipped (-51%)
+
+The key insight: the biggest wins came from the quarterly perf sprints, not from CI gates. CI gates prevented regressions. Dedicated work drove improvement. You need both.
+
+## Core Web Vitals Strategy
+
+Google's Core Web Vitals (LCP, CLS, INP) are the metrics that matter for SEO and user experience. Here's how I prioritize:
+
+### CLS first — it's the easiest win
+
+Layout shifts are almost always caused by:
+1. Images without dimensions
+2. Fonts loading late (FOUT/FOIT)
+3. Dynamic content injected above the fold
+4. Third-party ads or embeds
+
+```tsx
+// Always set explicit dimensions on images
+<Image
+  src="/hero.jpg"
+  width={1200}
+  height={630}
+  alt="Hero"
+  priority
+/>
+
+// Preload critical fonts
+<link
+  rel="preload"
+  href="/fonts/inter-var.woff2"
+  as="font"
+  type="font/woff2"
+  crossOrigin="anonymous"
+/>
+
+// Reserve space for dynamic content
+<div style={{ minHeight: '200px' }}>
+  <Suspense fallback={<Skeleton height={200} />}>
+    <DynamicContent />
+  </Suspense>
+</div>
+```
+
+### INP second — it's the new kid
+
+Interaction to Next Paint replaced FID in 2024 and it measures responsiveness across the entire page lifecycle. The biggest INP culprits:
+
+1. **Long tasks blocking the main thread** — break them up with `requestIdleCallback` or `scheduler.yield()`
+2. **Heavy re-renders on interaction** — profile with React DevTools, memoize strategically
+3. **Synchronous DOM operations** — batch reads and writes, use `requestAnimationFrame`
+
+```tsx
+// Break up long tasks
+async function processLargeList(items: Item[]) {
+  const CHUNK_SIZE = 50;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    processChunk(chunk);
+    // Yield to the main thread between chunks
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+```
+
+### LCP last — it's the hardest
+
+LCP optimization often requires architectural changes: server-side rendering, edge caching, image CDN configuration, critical CSS inlining. These aren't PR-level fixes — they're project-level investments.
+
+<Info>
+Don't try to optimize all three metrics simultaneously. Fix CLS first (usually a few days of work), then tackle INP (one sprint), then plan LCP improvements as a quarterly initiative. Incremental progress beats ambitious failure.
+</Info>
+
+## The Budget Document
+
+Every performance budget program needs a living document. Not a Confluence page that nobody reads — a `PERFORMANCE.md` in the repo root.
+
+```markdown
+# Performance Budget
+
+Last updated: 2026-02-15
+Owner: @frontend-platform
+
+## No-Regression Thresholds (CI enforced)
+| Route      | LCP    | CLS  | INP   | JS Bundle |
+|------------|--------|------|-------|-----------|
+| /          | 3.0s   | 0.1  | 200ms | 180KB     |
+| /dashboard | 4.0s   | 0.15 | 250ms | 280KB     |
+| /checkout  | 2.5s   | 0.05 | 150ms | 200KB     |
+
+## Stretch Goals (Q2 2026)
+- LCP p75 under 2.5s on landing page
+- INP p75 under 150ms globally
+- Total JS under 200KB gzipped on critical paths
+
+## How to investigate a regression
+1. Check bundle size delta in the PR comment
+2. Run `npm run analyze` locally
+3. Check RUM dashboard: [link]
+4. Ask in #perf-help
+```
+
+This document is the contract between the performance program and the engineering team. Keep it updated. Review it quarterly. Make it the first thing new engineers read about performance at your company.
+
+Performance budgets work when they're realistic, graduated, owned, and embedded in culture. Everything else is just tooling.

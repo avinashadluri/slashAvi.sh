@@ -1,0 +1,269 @@
+---
+title: "The 12-Week Year for Side Projects"
+description: "How I ship side projects using 12-week cycles — planning, execution, and accountability when nobody is watching."
+---
+
+# The 12-Week Year for Side Projects
+
+Every January, engineers set ambitious goals. "This year I'll launch my SaaS." "This year I'll contribute to open source." "This year I'll build that app I've been thinking about." By March, the goals are forgotten. By December, the cycle repeats with a fresh dose of guilt.
+
+I used to be this person. I had a graveyard of half-built projects — starter repos with grand READMEs and zero users. The problem wasn't motivation or skill. The problem was the timeline. A year is too long to maintain urgency, too abstract to plan against, and too forgiving of procrastination.
+
+Then I discovered Brian Moran's _The 12-Week Year_, and it changed how I ship side projects. The core insight is simple: treat 12 weeks like most people treat 12 months. Compress the planning horizon, increase the urgency, and ship in cycles — not someday.
+
+Here's how I've adapted it for building [Thinki.sh](/products), [PromptLib](/products), [MetaLabs](/products), and every other project in the /avi ecosystem.
+
+---
+
+## Why Annual Goals Fail for Side Projects
+
+Annual goals have three fatal flaws when applied to side projects:
+
+**1. No urgency until December.** When the deadline is 11 months away, there's always tomorrow. Side projects live on borrowed time — early mornings, late evenings, weekend blocks. Without urgency, that time gets absorbed by Netflix, scrolling, or "I'll start next week."
+
+**2. Too many goals, too little focus.** January ambition fills a list of 10+ goals. But side projects compete with a full-time job, family, health, and rest. You can't meaningfully advance 10 things in parallel with 5-8 hours per week of available time.
+
+**3. No feedback loops.** Annual goals have one review point: December. That's one chance per year to assess whether your approach is working. By the time you realize you're off track, you've wasted months.
+
+The 12-week year solves all three. The deadline is always close. You pick 2-3 goals maximum. And every week is a check-in.
+
+---
+
+## The 12-Week Plan: How I Set Up a Cycle
+
+Every 12-week cycle starts with a planning session. I block 2-3 hours on a Saturday morning with coffee, a blank Notion page, and zero distractions. Here's the framework.
+
+### Step 1: Choose 2-3 Goals (Maximum)
+
+The constraint is the point. With only 12 weeks and limited hours, you have to be ruthless about what makes the cut.
+
+My criteria for selecting a goal:
+- **Is it shippable in 12 weeks?** If the scope requires 6 months of full-time work, it's too big. Break it down.
+- **Does it produce something a user can touch?** "Learn Rust" is not a goal. "Build a CLI tool in Rust and publish it" is.
+- **Am I excited about it?** Side projects run on intrinsic motivation. If I'm choosing it out of obligation, it'll die in week 4.
+
+Example from my Q4 2025 cycle:
+1. Ship PromptLib v3 with persona-specific guardrails
+2. Publish 4 articles for /avi (engineering + productivity)
+3. Prototype GlucosePro calculator with clinical data integration
+
+<Warning>
+Three goals is the max. I've tried four. It always ends with none of them done well. Constraint breeds focus.
+</Warning>
+
+### Step 2: Break Each Goal into Weekly Milestones
+
+A 12-week goal without weekly milestones is just a wish with a deadline. I break each goal into 12 weekly deliverables — concrete, specific things I can check off.
+
+For "Ship PromptLib v3":
+- Week 1: Finalize persona schema and data model
+- Week 2: Build persona selection UI
+- Week 3: Implement guardrail engine (rule-based layer)
+- Week 4: Add LLM evaluation layer for guardrails
+- Week 5: Integration testing, edge cases
+- Week 6: Beta deployment, dogfooding
+- Week 7-8: Iterate based on feedback
+- Week 9: Documentation and onboarding flow
+- Week 10: Public launch prep (landing page, changelog)
+- Week 11: Launch, monitor, hotfix
+- Week 12: Retrospective and handoff to maintenance mode
+
+Not every week will go to plan. That's fine. The milestones give me a pace to aim for and a clear signal when I'm falling behind.
+
+### Step 3: Define Lead and Lag Measures
+
+This is borrowed directly from _The 4 Disciplines of Execution_, and it's the single most useful concept for side project accountability.
+
+**Lag measures** are the outcomes you want — launches, users, revenue. You can't directly control them.
+
+**Lead measures** are the activities that drive the outcomes. You _can_ control them.
+
+| Goal | Lag Measure | Lead Measures |
+|---|---|---|
+| Ship PromptLib v3 | Public launch by week 11 | 8 hrs/week coding, 1 PR merged/day |
+| Publish 4 articles | 4 published posts | 3 hrs/week writing, 1 draft/week |
+| GlucosePro prototype | Working calculator deployed | 5 hrs/week building, 2 clinical sources reviewed/week |
+
+I track lead measures weekly because they're the levers I can pull. If my lead measures are on track and the lag measures aren't following, the strategy is wrong. If my lead measures are slipping, the execution is wrong. Either way, I know what to fix.
+
+---
+
+## The Model Week
+
+Brian Moran's "Model Week" concept is powerful: design your ideal week in advance, then use it as a template rather than planning from scratch each Monday.
+
+Here's my model week during an active 12-week cycle:
+
+| Day | Side Project Time | Focus |
+|---|---|---|
+| Monday | 5:30-7:15 AM | Deep coding on primary goal |
+| Tuesday | 5:30-7:15 AM | Deep coding on primary goal |
+| Wednesday | 5:30-7:15 AM | Writing (articles, docs) |
+| Thursday | 5:30-7:15 AM | Deep coding on secondary goal |
+| Friday | 5:30-7:15 AM | Review, testing, polish |
+| Saturday | 6:00-8:30 AM | Flex block — catch up or explore |
+| Sunday | — | Rest. Weekly review only (30 min). |
+
+That's roughly 12-14 hours per week. Not a lot. But 12 focused hours per week for 12 weeks is 144+ hours of deep work on a project. That's enough to ship real software.
+
+<Tip>
+The model week isn't rigid — it's a default. Life happens. Arjun gets sick, a work deadline spills over, I'm just too tired. The model week means I don't have to make decisions about _when_ to work. I just follow the template unless there's a reason not to.
+</Tip>
+
+---
+
+## Weekly Planning and Scoring
+
+Every Sunday evening, I spend 30 minutes on the weekly review. This is non-negotiable — it's where accountability lives.
+
+### The Weekly Review Template
+
+```markdown
+## Week [X] of 12 — Review
+
+### Scores (out of 5)
+- Goal 1 execution: _/5
+- Goal 2 execution: _/5
+- Goal 3 execution: _/5
+- Overall week: _/5
+
+### Lead Measures
+- Coding hours: ___ (target: 8)
+- Writing hours: ___ (target: 3)
+- PRs merged: ___ (target: 5)
+
+### What shipped this week?
+- ...
+
+### What blocked me?
+- ...
+
+### Adjustments for next week
+- ...
+```
+
+The scoring is honest. A 5 means I hit every milestone. A 3 means I made progress but fell short. A 1 means the week was basically lost. I aim for an average of 3.5+ across the cycle.
+
+<Info>
+Moran says anything above 85% execution across the 12 weeks puts you in the top tier. For side projects with a full-time job and kids, I've found 70%+ is genuinely excellent. Don't compare yourself to people who do this full-time.
+</Info>
+
+---
+
+## Accountability Without a Team
+
+At work, you have standups, sprint reviews, and a manager who notices when things slip. Side projects have none of that. You are the PM, the engineer, the QA, and the stakeholder. When nobody is watching, accountability has to come from systems, not willpower.
+
+### What Works for Me
+
+**Public commitment** — I share my 12-week goals on Twitter/X at the start of each cycle. Not for clout — for skin in the game. Knowing that people have seen my commitment adds just enough social pressure to push through the hard weeks. More on this in [Building in Public](/productivity/building-in-public).
+
+**Weekly shiplog** — every Friday, I post a short update on what I shipped that week. Even if it's small. The act of writing "I shipped nothing this week" is uncomfortable enough to prevent it from happening twice in a row.
+
+**The accountability partner** — I have a friend (also an engineer, also a parent) and we share our weekly scores every Sunday. No judgment, no advice unless asked. Just visibility. Knowing someone will see a 1/5 score is a powerful motivator.
+
+**The streak** — I track consecutive days of working on side projects. Not hours — just did I show up and do _something_? The streak creates its own gravity. You don't want to break it.
+
+---
+
+## Dealing with Motivation Dips
+
+Every 12-week cycle has a valley. Usually around week 5-7. The initial excitement has worn off, the hard problems have surfaced, and the finish line feels far away.
+
+Here's how I handle it:
+
+**Reread the vision.** At the start of each cycle, I write a paragraph about why this project matters to me — not the features, but the feeling. What does it look like when it's done? Who does it help? When motivation dips, I reread this. It usually reignites something.
+
+**Shrink the scope.** Week 6 is often where I realize I overscoped. That's fine. I trim features aggressively. The question becomes: _What is the smallest version of this that I'd still be proud to ship?_ Ship that. You can always iterate.
+
+**Change the modality.** If I'm burned out on coding, I switch to writing docs, designing the landing page, or recording a demo video. Progress is progress, even if it's not code.
+
+**Take a guilt-free break.** Sometimes the right answer is to skip a day or two. Not every dip is a discipline problem — some are recovery signals. The 12-week year is a marathon, not a sprint, even though it feels shorter.
+
+<Warning>
+The dangerous response to a motivation dip is to add a new, shinier project. Resist this. New projects are easy. Finishing existing ones is where all the value lives.
+</Warning>
+
+---
+
+## Shipping Is the Goal, Not Perfection
+
+The most important mindset shift in the 12-week year: **done is the deliverable**.
+
+Engineers are especially prone to perfectionism. We want clean code, comprehensive tests, beautiful UI, perfect documentation. But a side project that's 80% polished and in users' hands is infinitely more valuable than a 95% polished project still sitting in a private repo.
+
+My shipping rules:
+- **If it works, ship it.** Polish in v1.1.
+- **If the test coverage is 70%+, ship it.** You'll find the real bugs from users, not from edge-case unit tests.
+- **If the landing page is "good enough," ship it.** Nobody remembers the landing page. They remember whether the product solved their problem.
+- **Write a changelog, not a press release.** Ship to your existing audience first. Big launches come later.
+
+PromptLib v1 was embarrassingly simple — a static page with prompt cards. But it shipped, people used it, and the feedback shaped v2 and v3 into something genuinely useful. If I'd waited for perfection, it would still be a Notion doc.
+
+---
+
+## Examples from the /avi Ecosystem
+
+### Thinki.sh — 2 cycles to v1
+
+Cycle 1 (12 weeks): Built the core framework engine, 5 playbooks, and basic UI. Shipped as a beta to 30 people for feedback.
+
+Cycle 2 (12 weeks): Rebuilt the UI based on feedback, added interactive canvases, launched publicly with workshop content.
+
+Total: ~24 weeks from idea to public product. Without the 12-week structure, this would have taken a year of sporadic effort.
+
+### PromptLib — 1 cycle to v1, ongoing iterations
+
+One 12-week cycle to go from concept to public launch. Weeks 1-4 were schema design and data entry. Weeks 5-8 were UI and search. Weeks 9-11 were polish and launch. Week 12 was retro and planning for the next cycle.
+
+### MetaLabs — Continuous cycles
+
+MetaLabs is an umbrella lab, so each tool within it gets its own 12-week cycle. GlucosePro got one cycle. The design system components got another. This prevents the "everything at once" trap.
+
+---
+
+## Review and Reset Between Cycles
+
+The week between cycles is sacred. No building. No shipping. Just reflection and planning.
+
+### The Cycle Retrospective
+
+I answer five questions:
+
+1. **What did I ship?** Concrete deliverables, not effort.
+2. **What did I learn?** Technical skills, product insights, personal patterns.
+3. **What would I do differently?** Process improvements for the next cycle.
+4. **What am I most proud of?** Celebrate the wins, even small ones.
+5. **What do I want to feel in the next cycle?** This emotional compass is surprisingly useful for goal selection.
+
+### The Reset
+
+- Archive the completed cycle's Notion board
+- Update the [/now page](/now) with what shipped
+- Take 2-3 days completely off from side projects
+- Enter the next cycle's planning session fresh
+
+The gap between cycles prevents burnout and provides perspective. Continuous sprinting without breaks leads to the same kind of hustle culture that makes people quit side projects entirely.
+
+---
+
+## Getting Started with Your First 12-Week Cycle
+
+If this resonates, here's how to start:
+
+1. **Pick one goal.** Not three — one. Your first cycle is about learning the system, not maximizing output.
+2. **Break it into 12 weekly milestones.** Be specific. "Make progress" is not a milestone. "Deploy the authentication flow to staging" is.
+3. **Define 2-3 lead measures.** Hours spent, PRs merged, pages written — things you directly control.
+4. **Design your model week.** When will you work? Be realistic about your actual available time.
+5. **Set up the weekly review.** 30 minutes, every Sunday. Non-negotiable.
+6. **Tell someone.** Post it publicly or tell a friend. Create accountability.
+
+The first cycle won't be perfect. Your scoring will feel awkward, your milestones will be wrong, and you'll probably overscope. That's fine. The system gets better every cycle because _you_ get better at using it.
+
+The only failure mode is not starting.
+
+---
+
+<Info>
+Related reads: [Deep Work When You Have Kids](/productivity/deep-work-guide) for protecting the time blocks this system needs, [Productivity Workflows](/productivity/workflows) for the daily operating system, and [Building in Public](/productivity/building-in-public) for the accountability layer.
+</Info>

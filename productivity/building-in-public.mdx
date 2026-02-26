@@ -1,0 +1,266 @@
+---
+title: "Building in Public: The Engineer's Guide"
+description: "How to share your work without becoming a content creator — genuine building in public for engineers who ship."
+---
+
+# Building in Public: The Engineer's Guide
+
+I'm not a content creator. I don't have a ring light. I don't batch-film TikToks. I don't have a "content calendar" managed by a VA. I'm an engineer who builds things, and somewhere along the way, I started sharing the process — the decisions, the mistakes, the lessons, the numbers.
+
+That's building in public. Not a brand strategy. Not a growth hack. Just the radical act of working with the garage door open.
+
+Over the past two years of sharing my work on [Thinki.sh](/products), [PromptLib](/products), and [MetaLabs](/products), I've gained more professional opportunities, built a genuine network, and developed clearer thinking — all as a side effect of simply documenting what I was already doing.
+
+This guide is for engineers who want to share their work without becoming influencers. It's about authenticity, not audience building. About compounding value, not viral moments.
+
+---
+
+## Why Build in Public
+
+There are four reasons to build in public, and none of them are "to get followers."
+
+### 1. Accountability
+
+When you tell people you're building something, you've created a soft commitment. Not a legal contract — just the gentle social pressure of knowing that someone is watching. This is especially powerful for side projects where [nobody is holding you accountable](/productivity/12-week-year).
+
+I share my 12-week cycle goals publicly at the start of each cycle. Knowing that 200+ people have seen my commitment makes the difference on those week-6 mornings when I'd rather sleep in.
+
+### 2. Network Effects
+
+The engineers I most admire — the ones who get invited to speak, consult, and collaborate — all have one thing in common: they share their work. Not because they're extroverts or self-promoters, but because sharing creates surface area for serendipity.
+
+When I tweeted about a specific architecture challenge with PromptLib's prompt evaluation engine, someone in my replies pointed me to a paper I hadn't found. That paper changed my approach and saved me weeks of wrong-path exploration. That connection only happened because I shared the problem publicly.
+
+### 3. Clarified Thinking
+
+Writing about what you're building forces you to articulate your reasoning. You can't share a vague "made progress today" — you have to explain what you built, why you chose that approach, and what you learned. This articulation process sharpens your thinking.
+
+I've caught architectural mistakes while writing about them. The act of explaining a decision to an audience reveals holes in the logic that you miss when the decision lives only in your head.
+
+### 4. Compound Returns
+
+A tweet disappears in hours. But a blog post about how you solved a specific caching problem lives forever. Building in public creates a growing body of evidence — of your skills, your thinking, your judgment — that compounds over time.
+
+My /avi site is this compound asset. Every article I write, every decision I document, every lesson I share adds to a public record that does work for me while I sleep. People discover articles I wrote a year ago and reach out. That doesn't happen if the knowledge stays in a private Notion page.
+
+---
+
+## What to Share (and What Not To)
+
+The biggest fear engineers have about building in public: "I don't have anything interesting to say." This is wrong. You have _plenty_ to say. You just need to know what's valuable to others.
+
+### High-Value Shares
+
+**Technical decisions and trade-offs.** "We chose Redis over Kafka for event processing because our throughput is under 10k/sec and the team already operates Redis. Here's the trade-off matrix." Engineers eat this up because it's real, contextual, and non-obvious.
+
+**Lessons from mistakes.** "Our deployment failed because we didn't account for timezone differences in the cron schedule. Here's what we changed." Failure stories are more valuable than success stories because they prevent others from repeating the same mistakes.
+
+**Progress updates with specifics.** "Week 4 of building PromptLib v3: shipped the persona selection UI, hit a wall on guardrail evaluation speed (200ms per check is too slow), pivoting to a rule-based first pass with LLM fallback." Specific, honest, useful.
+
+**Numbers and metrics.** "PromptLib has 1,200 monthly users, $0 revenue, and costs $47/month to run. Here's the breakdown." Real numbers build trust and help other builders calibrate their expectations.
+
+**Learning in real-time.** "I'm learning about agent evaluation harnesses this week. Three approaches I've found: human-in-the-loop, automated test suites, and LLM-as-judge. Here's what I'm seeing so far." You don't need to be an expert — you just need to be one step ahead.
+
+### Low-Value Shares
+
+- Vague motivational posts ("keep grinding!")
+- Celebrating metrics without context ("hit 1000 users!" — of what? Doing what?)
+- Polished announcements that hide the messy reality
+- Hot takes on technologies you haven't used
+- Humble-bragging disguised as lessons
+
+### What to Keep Private
+
+- Proprietary work from your employer (obviously)
+- Specific revenue or salary numbers you're not comfortable sharing
+- Personal struggles dressed up as productivity content
+- Anything that could harm a colleague, client, or community
+
+<Warning>
+Never share your employer's confidential information, even indirectly. "At my fintech company, we handle X million transactions" — don't. Build in public with your own projects. Reference work experience generically.
+</Warning>
+
+---
+
+## Platforms: Where to Share What
+
+Not every platform deserves the same content. I use a three-tier system based on content depth and audience.
+
+### Twitter/X: Quick Hits and Real-Time Updates
+
+**Best for:** Short observations, progress updates, technical takes, thread breakdowns, community engagement.
+
+**My cadence:** 3-5 tweets per week. Not scheduled — organic. When I have something worth saying, I say it.
+
+**What works:** Threads that walk through a technical decision. Screenshots of code with commentary. Honest progress updates with numbers. Replies to other builders that add genuine value.
+
+**What doesn't work:** Engagement-bait questions ("What's the best JavaScript framework?"). Regurgitating popular opinions. Posting just to maintain a streak.
+
+### LinkedIn: Career-Adjacent Insights
+
+**Best for:** Longer reflections on engineering leadership, career growth, team dynamics, and professional lessons. The audience is broader and more professionally-oriented.
+
+**My cadence:** 1-2 posts per month. Quality over quantity. LinkedIn rewards depth and authenticity more than frequency.
+
+**What works:** Stories from real engineering challenges (anonymized). Reflections on leadership lessons. Immigrant experience in tech. Mentorship insights. Career framework thinking.
+
+**What doesn't work:** Reposting Twitter content verbatim. Cringey "I'm humbled" announcements. AI-generated inspirational content.
+
+### Blog (/avi): Depth and Permanence
+
+**Best for:** Long-form guides, system breakdowns, detailed tutorials, book notes, and anything you want to exist for years.
+
+**My cadence:** 2-4 articles per month during active publishing periods. Zero during intense building periods. That's fine.
+
+**What works:** Everything on this site. Deep dives that would be impossible in a tweet. Articles that become reference material people bookmark and return to.
+
+| Platform | Content Type | Frequency | Shelf Life |
+|---|---|---|---|
+| Twitter/X | Quick updates, threads, takes | 3-5/week | Hours to days |
+| LinkedIn | Career reflections, leadership lessons | 1-2/month | Weeks to months |
+| Blog (/avi) | Long-form guides, deep dives | 2-4/month | Years |
+
+<Tip>
+Start with one platform. Build the habit of sharing before you diversify. Twitter/X is the lowest friction starting point for engineers because the format is forgiving and the community is responsive.
+</Tip>
+
+---
+
+## The Work Log → Content Pipeline
+
+Here's my actual system for turning daily work into shareable content, without it feeling like a separate job.
+
+### Step 1: The Daily Work Log (2 minutes)
+
+At the end of each work day — during my [shutdown ritual](/productivity/deep-work-guide) — I write 3-5 bullet points about what I did, what I learned, and what surprised me. This lives in Notion.
+
+```markdown
+## Tuesday, Feb 18
+
+- Implemented guardrail evaluation engine for PromptLib v3
+- Discovered that regex-based rules catch 80% of violations,
+  LLM fallback only needed for nuanced cases
+- Performance: rule engine runs in 12ms, LLM call adds 800ms.
+  Solution: waterfall — rules first, LLM only on ambiguous cases
+- Surprised by how much the persona schema simplified the
+  evaluation logic. Good abstractions pay forward.
+```
+
+### Step 2: Weekly Scan (10 minutes, during Sunday review)
+
+During my [weekly review](/productivity/second-brain), I scan the work log for entries that might be interesting to others. I'm looking for:
+
+- Decisions with non-obvious trade-offs
+- Mistakes and what I learned
+- Surprising results or metrics
+- Patterns that repeat across projects
+
+I tag promising entries with `#shareable`.
+
+### Step 3: Draft and Publish (varies)
+
+Tagged entries become content. A short one becomes a tweet. A meaty one becomes a thread. A rich one becomes a blog post. The drafting happens during my Wednesday morning writing block (see [model week](/productivity/12-week-year)).
+
+The key: **I'm not creating content. I'm extracting signal from work I've already done.** The marginal cost of sharing is low because the thinking has already happened.
+
+---
+
+## Avoiding the Content Treadmill
+
+The biggest risk of building in public is that it becomes another obligation — another thing on the todo list, another source of guilt when you skip a week. This defeats the entire purpose.
+
+### My Anti-Treadmill Rules
+
+**No posting schedules.** I don't commit to "one tweet per day" or "three posts per week." I share when I have something worth sharing. Some weeks that's daily. Some weeks it's nothing. Both are fine.
+
+**Building always comes first.** If I have two hours and I can either code or write a thread about coding, I code. The content comes from the work, not the other way around. Reversing this priority is how engineers become content creators who don't ship.
+
+**No vanity metrics.** I don't track follower count, impressions, or engagement rates. I pay attention to meaningful signals: replies from people I respect, DMs that lead to real conversations, blog posts that get bookmarked.
+
+**Seasonal intensity.** During heavy building phases (weeks 1-8 of a 12-week cycle), I share less. During launch and reflection phases (weeks 9-12), I share more. This natural rhythm prevents burnout.
+
+**The "would I write this in my journal?" test.** If a post feels performative — if I'm writing it for the audience reaction rather than because I genuinely want to share the insight — I don't post it. Authenticity is the moat. Once you start optimizing for engagement, you've lost the thing that made your sharing valuable in the first place.
+
+<Info>
+Building in public should feel like leaving the garage door open while you work — not like performing on stage. If it feels like performance, pull back.
+</Info>
+
+---
+
+## Authentic vs. Performative Sharing
+
+There's a spectrum in the building-in-public world, and it's worth being honest about where different types of sharing fall.
+
+**Authentic sharing:**
+- "Here's a problem I'm stuck on and how I'm thinking about it"
+- "This week's numbers: 47 signups, 12 retained, 35 churned. Learning: onboarding is broken."
+- "I made a bad architecture decision three months ago. Here's what it cost us and what I'd do differently."
+- "Honest question: has anyone solved X? Here's what I've tried."
+
+**Performative sharing:**
+- "Just shipped feature X! So grateful for this journey 🚀🙏" (no substance, just vibes)
+- Posting about "working at 4 AM" for hustle cred
+- Sharing curated highlights while hiding the struggles
+- Engagement-bait questions you already know the answer to
+- Screenshot of code that's intentionally provocative
+
+The authentic version is harder because it requires vulnerability. Sharing a mistake or a bad week feels risky. But it's also what people actually value. The internet is drowning in polished success stories. Honest accounts of the messy middle are rare and genuinely useful.
+
+---
+
+## Dealing with Criticism
+
+When you share publicly, some people will disagree, critique, or occasionally be rude. Here's how I handle it:
+
+**Constructive disagreement → engage.** Someone pointing out a flaw in my approach or suggesting an alternative is a gift. I thank them, ask questions, and often learn something. Some of my best technical insights came from Twitter replies that challenged my assumptions.
+
+**Good-faith questions → answer generously.** If someone asks "why didn't you use X instead?", assume good intent and explain your reasoning. These exchanges build genuine relationships.
+
+**Bad-faith attacks → ignore completely.** No response, no engagement, no emotional energy. Block if needed. Life is too short, and attention is too valuable, to engage with people who aren't operating in good faith.
+
+**Imposter syndrome → normal, push through.** Every time I publish something, a voice says "who are you to write about this?" The answer: someone who has done the work, made the mistakes, and learned something worth sharing. You don't need to be the world's leading expert. You need to be one step ahead of the person reading.
+
+---
+
+## The Compound Effect of Consistent Sharing
+
+Building in public is a long game. The first month, nobody reads your stuff. The first six months, a handful of people engage. After a year of consistent (not constant — consistent) sharing, the compound effect kicks in:
+
+- People start recognizing your name in specific domains
+- Opportunities arrive that you didn't apply for — speaking invitations, consulting requests, collaboration offers
+- Your published work becomes a portfolio that's more persuasive than any resume
+- You build a genuine network of people who share your interests and values
+
+### My Timeline
+
+**Months 1-3:** Tweeted into the void. 5-10 likes per post. Felt pointless. But I was building the habit.
+
+**Months 4-6:** A few threads gained traction. Started getting replies from engineers I respected. First blog post got 200 reads.
+
+**Months 7-12:** Consistent cadence established. PromptLib launch got real attention because I'd been sharing the build process for months. People were invested in the outcome before it shipped.
+
+**Year 2:** /avi becomes a genuine resource people reference. Professional opportunities appear directly from published work. Network of builder-friends that makes side projects less lonely.
+
+The takeaway: the first six months feel unrewarding. Push through. The compound curve is real, but it starts slow.
+
+---
+
+## Getting Started: The Minimum Viable Build-in-Public Practice
+
+If you're convinced but overwhelmed, start here:
+
+1. **Choose one platform.** Twitter/X for most engineers. Lower friction, faster feedback loops.
+2. **Share one thing per week.** One decision, one mistake, one lesson, one metric. That's it.
+3. **Keep a daily work log.** 2 minutes at end of day. This is your content source.
+4. **Don't optimize for engagement.** Write for the version of you from six months ago. What would that person have found useful?
+5. **Commit for 12 weeks.** One [12-week cycle](/productivity/12-week-year) of consistent sharing. Evaluate at the end.
+
+The bar is lower than you think. You don't need a following. You don't need a brand. You don't need a content strategy. You just need to work with the garage door open and trust that the compound effect will do its thing.
+
+Ship the work. Share the journey. Let the results compound.
+
+---
+
+<Info>
+Related reads: [The 12-Week Year for Side Projects](/productivity/12-week-year) for the accountability framework that pairs with building in public, [The Second Brain for Engineers](/productivity/second-brain) for the capture system that feeds the content pipeline, and [Productivity Workflows](/productivity/workflows) for the daily operating system behind all of this.
+</Info>

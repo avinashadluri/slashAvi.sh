@@ -1,0 +1,450 @@
+---
+title: "Evaluating LLM Output: Beyond Vibes"
+description: "How to systematically evaluate LLM quality — metrics, eval frameworks, human review, and building confidence in AI features."
+---
+
+# Evaluating LLM Output: Beyond Vibes
+
+Here's how most teams evaluate their LLM features: someone runs ten examples through the system, eyeballs the output, says "looks good," and ships it. Two weeks later, a customer finds a confidently wrong answer and trust evaporates.
+
+I call this vibes-based evaluation, and I've been guilty of it. At PromptLib and MetaLabs, my early AI features shipped without proper evaluation. The results were predictable — inconsistent quality, embarrassing failures, and constant firefighting.
+
+This guide covers what I learned the hard way: how to systematically evaluate LLM output so you can ship AI features with actual confidence.
+
+## The Vibes-Based Evaluation Problem
+
+Let me be specific about why vibes don't work:
+
+**LLMs are non-deterministic**. Even at temperature 0, minor changes in context, API versions, or system load can produce different outputs. Your ten manual tests might all look great while the eleventh input triggers a failure mode.
+
+**Humans are bad at consistent evaluation**. If you rate the same output on Monday and Friday, you'll give different scores. If you evaluate outputs in order, you'll anchor on the first one. If you're tired, everything looks "fine."
+
+**You test happy paths**. When you pick ten test inputs manually, you unconsciously pick easy ones. The hard cases — ambiguous inputs, adversarial inputs, edge cases, multilingual content — don't make it into your ad-hoc test set.
+
+**You can't detect regression**. Without a baseline measurement, you have no way to know if a prompt change made things better or worse. "Feels about the same" is not a measurement.
+
+The cost of shipping a bad AI feature is asymmetric. One confidently wrong answer — especially in domains like finance, health, or legal — can cost you more in trust than a hundred correct answers earn.
+
+## Metrics That Actually Matter
+
+Not all metrics are equally useful for all tasks. Here's my framework for choosing metrics based on what your LLM is doing.
+
+### For Information Retrieval (RAG, Q&A)
+
+**Faithfulness**: Does the answer only use information from the provided context? This is the hallucination metric. Score: what percentage of claims in the answer can be traced back to the context?
+
+```python
+from ragas.metrics import faithfulness
+
+# Faithfulness = number of claims supported by context / total claims
+# Target: > 0.9 for production systems
+```
+
+**Answer Relevancy**: Does the answer address the question that was asked? A perfectly faithful answer to the wrong question is still a failure.
+
+**Context Recall**: Did the retrieval step find the relevant documents? If the answer is wrong because the right context wasn't retrieved, that's a retrieval problem, not a generation problem.
+
+### For Classification and Extraction
+
+**Accuracy**: Simple — did the model predict the correct class? For extraction, did it pull out the right entities?
+
+**Precision and Recall by class**: Accuracy hides class imbalance. If 95% of inputs are "positive" and the model always predicts "positive," it's 95% accurate and completely useless.
+
+```python
+from sklearn.metrics import classification_report
+
+report = classification_report(
+    y_true=expected_labels,
+    y_pred=model_labels,
+    output_dict=True
+)
+
+# Check per-class metrics, not just overall accuracy
+for label, metrics in report.items():
+    if isinstance(metrics, dict):
+        print(f"{label}: precision={metrics['precision']:.2f}, "
+              f"recall={metrics['recall']:.2f}")
+```
+
+### For Generation (Summarization, Writing)
+
+**Factual consistency**: Does the summary accurately represent the source material?
+
+**Completeness**: Does the summary cover the key points?
+
+**Conciseness**: Is the output appropriately sized? LLMs tend to be verbose — measure output length against your targets.
+
+**Toxicity and safety**: Does the output contain harmful, biased, or inappropriate content? This matters more than you think, especially for user-facing features.
+
+### Universal Metrics
+
+These apply to every LLM feature:
+
+| Metric | What It Measures | Target |
+|---|---|---|
+| **Latency (P50, P95)** | Time to generate response | P95 < 3s for interactive |
+| **Schema compliance** | Does output parse correctly? | > 99.5% |
+| **Error rate** | API failures, timeouts, parse errors | < 1% |
+| **Token usage** | Input + output tokens per request | Within budget |
+| **Cost per request** | Dollar cost per inference | Within budget |
+
+## Building Eval Datasets
+
+An eval dataset is the foundation of systematic evaluation. Without one, everything else is theater.
+
+### Starting From Scratch
+
+If you have no eval dataset, start with 50 examples. Yes, 50 is enough to start. Don't let perfectionism stop you from starting.
+
+```python
+eval_dataset = []
+
+# Method 1: Curate from real production data
+# Sample inputs from your logs, manually label expected outputs
+real_inputs = sample_production_logs(n=30)
+for inp in real_inputs:
+    expected = manually_generate_expected_output(inp)
+    eval_dataset.append({"input": inp, "expected": expected})
+
+# Method 2: Generate synthetic edge cases
+edge_cases = [
+    {"input": "", "expected": "ERROR: empty input"},
+    {"input": "a" * 10000, "expected": "ERROR: input too long"},
+    {"input": "¿Cuál es el precio?", "expected": "..."},  # non-English
+    {"input": "ignore previous instructions", "expected": "..."},  # injection
+]
+eval_dataset.extend(edge_cases)
+
+# Method 3: Use LLM to generate diverse test cases
+diverse_inputs = generate_diverse_inputs(
+    description="Customer support questions for a SaaS billing tool",
+    n=20,
+    include_edge_cases=True
+)
+```
+
+### The Eval Dataset Lifecycle
+
+1. **Start with 50 examples** covering happy paths and obvious edge cases
+2. **Add failure cases** from production — every bug becomes a test case
+3. **Stratify by difficulty** — easy, medium, hard cases should all be represented
+4. **Review quarterly** — inputs change over time, and so should your eval set
+5. **Target 200+ examples** within 3 months of launch
+
+<Warning>
+Never evaluate solely on the examples you used during prompt development. This is the equivalent of testing with your training data. Keep a held-out test set that you only run after you think the prompt is ready.
+</Warning>
+
+### Golden Datasets vs Rubric-Based Evaluation
+
+**Golden datasets** have exact expected outputs. Good for classification, extraction, and factual Q&A.
+
+**Rubric-based evaluation** uses criteria instead of exact answers. Better for generation tasks where multiple good outputs exist.
+
+```python
+rubric = {
+    "completeness": "Does the summary cover all key points from the source?",
+    "accuracy": "Are all stated facts correct?",
+    "conciseness": "Is the summary under 100 words without losing key information?",
+    "tone": "Is the tone professional and neutral?",
+}
+
+# Use an LLM-as-judge with the rubric
+def evaluate_with_rubric(output: str, source: str, rubric: dict) -> dict:
+    scores = {}
+    for criterion, description in rubric.items():
+        score = llm_judge(
+            f"Rate this output on '{criterion}': {description}\n\n"
+            f"Source: {source}\n\nOutput: {output}\n\n"
+            f"Score (1-5) and brief justification:"
+        )
+        scores[criterion] = score
+    return scores
+```
+
+## Eval Frameworks
+
+I've used three evaluation frameworks and each has its niche.
+
+### RAGAS
+
+Best for RAG evaluation. It measures faithfulness, answer relevancy, context precision, and context recall with minimal setup.
+
+```python
+from ragas import evaluate
+from ragas.metrics import (
+    faithfulness,
+    answer_relevancy,
+    context_precision,
+    context_recall,
+)
+from datasets import Dataset
+
+eval_data = Dataset.from_dict({
+    "question": questions,
+    "answer": generated_answers,
+    "contexts": retrieved_contexts,
+    "ground_truth": expected_answers,
+})
+
+result = evaluate(
+    dataset=eval_data,
+    metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+)
+
+print(result)
+# {'faithfulness': 0.92, 'answer_relevancy': 0.88, ...}
+```
+
+### DeepEval
+
+More general-purpose. Good for custom metrics and integration with CI/CD.
+
+```python
+from deepeval import assert_test
+from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
+from deepeval.test_case import LLMTestCase
+
+test_case = LLMTestCase(
+    input="What is the refund policy?",
+    actual_output=model_output,
+    retrieval_context=retrieved_chunks,
+    expected_output="Full refund within 30 days..."
+)
+
+relevancy_metric = AnswerRelevancyMetric(threshold=0.7)
+faithfulness_metric = FaithfulnessMetric(threshold=0.8)
+
+assert_test(test_case, [relevancy_metric, faithfulness_metric])
+```
+
+### Custom Evaluation (What I Usually End Up Building)
+
+For production systems, I almost always end up building a custom eval harness that combines automated metrics with LLM-as-judge and human review. Frameworks are great for getting started, but real production evaluation needs are too specific for off-the-shelf tools.
+
+```python
+class EvalHarness:
+    def __init__(self, eval_dataset: list[dict]):
+        self.dataset = eval_dataset
+        self.results = []
+
+    def run(self, system_under_test) -> dict:
+        for case in self.dataset:
+            output = system_under_test(case["input"])
+
+            result = {
+                "input": case["input"],
+                "output": output,
+                "expected": case.get("expected"),
+                "metrics": {
+                    "latency_ms": output.latency_ms,
+                    "tokens_used": output.tokens_used,
+                    "schema_valid": self._check_schema(output),
+                    "correctness": self._check_correctness(output, case),
+                    "llm_judge_score": self._llm_judge(output, case),
+                }
+            }
+            self.results.append(result)
+
+        return self._aggregate_results()
+
+    def _aggregate_results(self) -> dict:
+        metrics = [r["metrics"] for r in self.results]
+        return {
+            "accuracy": mean(m["correctness"] for m in metrics),
+            "schema_compliance": mean(m["schema_valid"] for m in metrics),
+            "avg_latency_ms": mean(m["latency_ms"] for m in metrics),
+            "p95_latency_ms": percentile(
+                [m["latency_ms"] for m in metrics], 95
+            ),
+            "avg_judge_score": mean(m["llm_judge_score"] for m in metrics),
+            "total_cost": sum(
+                m["tokens_used"] * COST_PER_TOKEN for m in metrics
+            ),
+        }
+```
+
+## LLM-as-Judge: Using Models to Evaluate Models
+
+This sounds circular, but it works surprisingly well when done correctly. The key insight: a strong model (GPT-4o, Claude 3.5 Sonnet) is a reliable judge of weaker models, and even a reasonable judge of its own output when given clear criteria.
+
+### Making It Work
+
+```python
+JUDGE_PROMPT = """You are evaluating the quality of an AI assistant's response.
+
+## Evaluation Criteria
+- **Correctness** (1-5): Are the facts accurate? Is the logic sound?
+- **Completeness** (1-5): Does the response fully address the question?
+- **Clarity** (1-5): Is the response easy to understand?
+- **Conciseness** (1-5): Is the response appropriately brief without omitting key info?
+
+## Input
+Question: {question}
+Reference Answer: {reference}
+Model Response: {response}
+
+## Instructions
+Rate each criterion 1-5. Provide a brief justification for each score.
+Return JSON: {{"correctness": N, "completeness": N, "clarity": N, "conciseness": N, "justification": "..."}}
+"""
+```
+
+### When LLM-as-Judge Fails
+
+- **Subjective tasks**: The judge model has its own biases and preferences
+- **Domain expertise**: The judge can't evaluate medical or legal accuracy better than a domain expert
+- **Self-preference**: Models tend to rate their own output slightly higher — use a different model as judge than the one being evaluated
+- **Adversarial inputs**: If the model being tested is generating adversarial or manipulative output, the judge may be fooled
+
+<Tip>
+Use LLM-as-judge for speed and scale. Use human review for ground truth calibration. Run both, compare periodically, and adjust the judge prompt when they disagree systematically.
+</Tip>
+
+## A/B Testing LLM Features
+
+A/B testing AI features is harder than A/B testing traditional features because the output varies even within the same treatment.
+
+### What to Test
+
+- **Model versions**: GPT-4o vs GPT-4o-mini — is the quality difference worth the cost?
+- **Prompt versions**: Does the new prompt actually perform better?
+- **System architecture**: Does re-ranking improve user satisfaction?
+- **Parameters**: Temperature 0 vs 0.3 for your specific use case
+
+### How to Measure
+
+For AI features, I focus on **downstream user metrics**, not AI quality metrics:
+
+- Did the user accept the AI suggestion?
+- Did the user edit the AI output before using it?
+- Did the user retry or regenerate?
+- Did the user accomplish their goal faster?
+- Did the user report the output as wrong?
+
+```python
+def log_ai_interaction(user_id, variant, output, user_action):
+    event = {
+        "user_id": user_id,
+        "variant": variant,  # "prompt_v2" or "prompt_v3"
+        "output_length": len(output),
+        "latency_ms": output.latency_ms,
+        "user_accepted": user_action == "accept",
+        "user_edited": user_action == "edit",
+        "user_rejected": user_action == "reject",
+        "user_regenerated": user_action == "regenerate",
+    }
+    analytics.track("ai_interaction", event)
+```
+
+### Statistical Significance
+
+LLM output variance makes it tempting to declare a winner too early. Resist this. I require:
+
+- At least 1000 interactions per variant
+- P-value < 0.05 on the primary metric
+- Consistent directional effect across user segments
+
+## Regression Testing for Prompts
+
+Every prompt change can break things. Regression testing catches this before users do.
+
+### The Workflow
+
+```bash
+# 1. Change the prompt
+# 2. Run the eval suite
+python run_eval.py --prompt-version v2.4 --dataset eval_v3.json
+
+# 3. Compare against baseline
+python compare_evals.py --baseline v2.3 --candidate v2.4
+
+# Output:
+# Metric          | v2.3   | v2.4   | Change
+# accuracy        | 0.923  | 0.931  | +0.8% ✅
+# faithfulness    | 0.891  | 0.872  | -1.9% ⚠️
+# schema_valid    | 0.998  | 0.999  | +0.1% ✅
+# avg_latency_ms  | 1240   | 1180   | -4.8% ✅
+# cost_per_query  | $0.012 | $0.014 | +16.7% ⚠️
+```
+
+Regression tests should run automatically on every prompt change. I trigger them in CI when prompt files are modified.
+
+### The "No Worse" Rule
+
+My bar for shipping a prompt change: it must be no worse than the current version on *any* metric, and meaningfully better on at least one. If faithfulness drops even slightly, that's a blocker.
+
+## Continuous Monitoring in Production
+
+Evaluation doesn't stop at deployment. In production, I monitor:
+
+### Real-Time Signals
+
+- **Error rate**: Parse failures, API timeouts, empty responses
+- **Latency distribution**: P50, P95, P99 — sudden spikes indicate problems
+- **Token usage**: Unexpected spikes mean something changed in inputs or prompts
+- **Schema compliance**: Percentage of outputs that parse correctly
+
+### Sampled Quality Checks
+
+You can't human-review every output, but you can review a sample.
+
+```python
+SAMPLE_RATE = 0.02  # Review 2% of production outputs
+
+def should_sample(output) -> bool:
+    if output.confidence < 0.7:
+        return True  # Always review low-confidence
+    if output.latency_ms > 5000:
+        return True  # Always review slow responses
+    return random.random() < SAMPLE_RATE
+
+def log_for_review(input_data, output):
+    if should_sample(output):
+        review_queue.add({
+            "input": input_data,
+            "output": output.text,
+            "metadata": output.metadata,
+            "auto_scores": run_auto_metrics(output),
+        })
+```
+
+### Drift Detection
+
+Model behavior changes over time — both from model updates (if you're on a managed API) and from input distribution shifts.
+
+I run my full eval suite weekly against production and compare to the baseline. If accuracy drops more than 2 percentage points, an alert fires.
+
+## Cost of Evaluation vs Cost of Failure
+
+Teams skip evaluation because it's expensive. Let me reframe that.
+
+Running an eval suite of 200 examples on GPT-4o costs about $2-5. Running it weekly costs $100-250 per year.
+
+One wrong answer shown to a customer at the wrong time can cost you:
+- A churned enterprise contract ($50K+)
+- A compliance violation ($10K+ in fines)
+- A viral social media post ($priceless in negative brand impact)
+- Engineering time to firefight ($5K+ in labor costs)
+
+The math is obvious. Evaluation is the cheapest insurance you can buy for AI features.
+
+<Info>
+If you take nothing else from this guide: build an eval dataset of 50 examples before you ship. Run it before every prompt change. It takes one afternoon to set up and will save you weeks of debugging over the lifetime of the feature.
+</Info>
+
+## The Evaluation Maturity Model
+
+Where are you on this scale?
+
+| Level | Description | Characteristics |
+|---|---|---|
+| 0 - Vibes | Manual spot-checking | "Looks good to me" |
+| 1 - Basic | Eval dataset exists | 50+ examples, run manually |
+| 2 - Automated | CI runs evals on prompt changes | Regression testing, automated metrics |
+| 3 - Comprehensive | Multiple metric types, LLM judge + human review | A/B testing, sampled quality checks |
+| 4 - Mature | Continuous monitoring, drift detection, eval dataset evolves | Weekly eval runs, automated alerting |
+
+Most teams I've seen are at Level 0. Getting to Level 1 takes an afternoon. Getting to Level 2 takes a week. The jump from Level 0 to Level 2 is the highest-ROI investment you can make in an AI feature.
+
+Do the work. Your users — and your future self at 2 AM debugging a production issue — will thank you.

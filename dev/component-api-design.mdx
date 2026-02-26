@@ -1,0 +1,386 @@
+---
+title: "Component API Design That Scales"
+description: "Patterns for building React component APIs that last — naming, composition, polymorphism, and the mistakes I've made."
+---
+
+# Component API Design That Scales
+
+After fifteen years of building UIs and several years specifically building design systems at Atlassian and Weel, I've come to believe that the hardest problem in frontend engineering isn't state management, rendering performance, or even CSS. It's designing component APIs that survive contact with other engineers.
+
+A component API is a contract. Once someone imports your `<Button>`, you're on the hook. Every prop you expose is a promise. Every pattern you establish becomes a precedent. And unlike backend APIs where you can version endpoints, component APIs live inside other people's code — changing them means changing their code.
+
+Here's what I've learned about getting them right.
+
+## The API Surface Area Concept
+
+Every prop you add to a component increases its **API surface area**. More surface area means more to document, more to test, more edge-case interactions, and more you can never remove without a breaking change.
+
+I think of it like this: a component with 3 props has a small surface area — it's easy to understand, hard to misuse. A component with 30 props is an aircraft cockpit. Most people will use 4 of those props and be confused by the other 26.
+
+```tsx
+// Small surface area — clear, hard to misuse
+<Button variant="primary" size="md" onClick={handleClick}>
+  Save
+</Button>
+
+// Aircraft cockpit — what do half of these even do?
+<Button
+  variant="primary"
+  size="md"
+  onClick={handleClick}
+  isLoading={false}
+  loadingText="Saving..."
+  leftIcon={<SaveIcon />}
+  rightIcon={null}
+  iconSpacing="0.5rem"
+  isFullWidth={false}
+  isDisabled={false}
+  isActive={false}
+  colorScheme="blue"
+  spinnerPlacement="start"
+  type="button"
+  form={undefined}
+>
+  Save
+</Button>
+```
+
+My rule of thumb: **if a component has more than 7-8 props, you probably need composition, not configuration**.
+
+## Naming Conventions That Prevent Arguments
+
+Naming is the first thing that goes wrong. I've seen teams spend an hour debating `isDisabled` vs `disabled` vs `state="disabled"`. Here's the convention I enforce and why.
+
+### Boolean props: `is` / `has` prefix
+
+```tsx
+// ✅ Clear intent
+isDisabled, isLoading, isOpen, hasError, isSelected
+
+// ❌ Ambiguous — is this a boolean or something else?
+disabled, loading, open, error, selected
+```
+
+The `is`/`has` prefix makes it unambiguous that the prop is a boolean. Yes, HTML uses `disabled` without a prefix. But we're not writing HTML — we're writing component APIs consumed by engineers who read props in autocomplete dropdowns. `isDisabled` screams "boolean" in a way `disabled` doesn't.
+
+### Event handlers: `on` prefix
+
+```tsx
+// ✅ Consistent
+onClose, onChange, onSubmit, onSelectionChange
+
+// ❌ Inconsistent
+handleClose, close, closeCallback
+```
+
+The `on` prefix aligns with DOM conventions and React's own patterns. The handler *inside* the component can be `handleClose`, but the *prop* should always be `onClose`.
+
+### Variants: union types, not booleans
+
+```tsx
+// ✅ Extensible, clear
+variant: 'primary' | 'secondary' | 'danger' | 'ghost'
+size: 'sm' | 'md' | 'lg'
+
+// ❌ Boolean explosion
+isPrimary, isSecondary, isDanger, isGhost
+```
+
+Boolean props for variants fail the moment you need a new variant. They also allow illegal states — what happens when both `isPrimary` and `isDanger` are true?
+
+<Tip>
+Use TypeScript union types for any prop that represents a choice between mutually exclusive options. It makes illegal states unrepresentable at the type level.
+</Tip>
+
+## Composition vs Configuration
+
+This is the single most important decision in component API design, and it's the one most teams get wrong early.
+
+**Configuration** means one component with many props:
+
+```tsx
+<Select
+  options={options}
+  isMulti={true}
+  isSearchable={true}
+  placeholder="Choose..."
+  noOptionsMessage="Nothing found"
+  loadingMessage="Loading..."
+  formatOptionLabel={(option) => <CustomLabel {...option} />}
+  filterOption={(option, input) => customFilter(option, input)}
+/>
+```
+
+**Composition** means multiple components that work together:
+
+```tsx
+<Select value={value} onChange={onChange}>
+  <SelectTrigger>
+    <SelectValue placeholder="Choose..." />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectGroup>
+      <SelectLabel>Fruits</SelectLabel>
+      <SelectItem value="apple">Apple</SelectItem>
+      <SelectItem value="banana">Banana</SelectItem>
+    </SelectGroup>
+  </SelectContent>
+</Select>
+```
+
+Configuration is faster to use for simple cases. Composition is more flexible for complex ones. The problem is that simple cases always become complex ones.
+
+### When to use composition
+
+- The component has **multiple visual regions** (header, body, footer)
+- Users need to **control rendering** of sub-parts
+- There are **many possible arrangements** of child elements
+- The component is part of a **design system** consumed by many teams
+
+### When configuration is fine
+
+- The component is **leaf-level** (no meaningful sub-parts)
+- The use cases are **well-known and stable**
+- You're building an **application component**, not a library component
+
+I learned this the hard way at Atlassian. We built a `Modal` with configuration — `headerContent`, `footerContent`, `bodyContent` props. Within six months, teams wanted custom padding in the body, sticky footers, headers with tabs, modals without headers. Every request became a new prop. We eventually rebuilt it as a compound component and the prop count dropped by 60%.
+
+## Compound Components Done Right
+
+Compound components are the composition pattern in React. They're a group of components that work together to form a cohesive whole, sharing implicit state.
+
+```tsx
+function Tabs({ defaultValue, children }: TabsProps) {
+  const [activeTab, setActiveTab] = useState(defaultValue);
+
+  return (
+    <TabsContext.Provider value={{ activeTab, setActiveTab }}>
+      <div role="tablist">{children}</div>
+    </TabsContext.Provider>
+  );
+}
+
+function TabList({ children }: { children: React.ReactNode }) {
+  return <div className="tab-list">{children}</div>;
+}
+
+function Tab({ value, children }: TabProps) {
+  const { activeTab, setActiveTab } = useTabsContext();
+  return (
+    <button
+      role="tab"
+      aria-selected={activeTab === value}
+      onClick={() => setActiveTab(value)}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabPanel({ value, children }: TabPanelProps) {
+  const { activeTab } = useTabsContext();
+  if (activeTab !== value) return null;
+  return <div role="tabpanel">{children}</div>;
+}
+
+// Usage
+<Tabs defaultValue="overview">
+  <TabList>
+    <Tab value="overview">Overview</Tab>
+    <Tab value="settings">Settings</Tab>
+  </TabList>
+  <TabPanel value="overview">Overview content</TabPanel>
+  <TabPanel value="settings">Settings content</TabPanel>
+</Tabs>
+```
+
+The key insight is that the parent owns the state and shares it via context, but the children own the rendering. This gives consumers full control over what goes where without the parent needing to know about it.
+
+### Rules for compound components
+
+1. **Shared state goes in context** — not prop drilling
+2. **Each sub-component should work only inside its parent** — throw a helpful error otherwise
+3. **Expose a hook for advanced consumers** — `useTabsContext()` lets people build custom tab components
+4. **Namespace exports** — `Tabs.List`, `Tabs.Tab`, `Tabs.Panel` or separate named exports
+
+```tsx
+// Helpful error for misuse
+function useTabsContext() {
+  const context = useContext(TabsContext);
+  if (!context) {
+    throw new Error(
+      'Tab components must be used within a <Tabs> provider. ' +
+      'Did you forget to wrap your tabs in <Tabs>?'
+    );
+  }
+  return context;
+}
+```
+
+<Warning>
+Don't use compound components for everything. A `Button` doesn't need to be `<Button><Button.Label>Click</Button.Label></Button>`. Use them when there are genuinely independent sub-parts with their own rendering concerns.
+</Warning>
+
+## Polymorphic Components: The `as` Prop
+
+Sometimes a component needs to render as different HTML elements or even other components. A `Button` might need to be an `<a>` when it links somewhere. A `Box` might need to be a `<section>` or `<article>`.
+
+```tsx
+type PolymorphicProps<E extends React.ElementType> = {
+  as?: E;
+  children: React.ReactNode;
+} & Omit<React.ComponentPropsWithoutRef<E>, 'as' | 'children'>;
+
+function Text<E extends React.ElementType = 'span'>({
+  as,
+  children,
+  ...props
+}: PolymorphicProps<E>) {
+  const Component = as || 'span';
+  return <Component {...props}>{children}</Component>;
+}
+
+// Usage — fully typed
+<Text>Default span</Text>
+<Text as="p">Paragraph</Text>
+<Text as="label" htmlFor="email">Label with htmlFor</Text>
+<Text as={Link} href="/about">Next.js Link</Text>
+```
+
+The type gymnastics here are real, but the payoff is that consumers get correct prop types based on the `as` value. If you pass `as="a"`, TypeScript knows `href` is valid. If you pass `as="button"`, it knows `type` is valid.
+
+### When polymorphism goes wrong
+
+I've seen teams make everything polymorphic. Don't. Polymorphism adds cognitive load and makes components harder to document and test. Use it when:
+
+- The component is a **primitive** (Box, Text, Flex) that genuinely maps to multiple elements
+- You need **semantic HTML** flexibility without duplicating styling logic
+- The consumer legitimately needs to **swap the underlying element**
+
+Don't use it when the component has a clear, single semantic purpose. A `Modal` is always a `dialog`. A `Checkbox` is always an `input`.
+
+## Render Props vs Hooks vs Composition
+
+The evolution of React patterns has given us three ways to share behavior:
+
+| Pattern | Best For | Trade-off |
+|---------|----------|-----------|
+| Render props | Passing data to flexible UI | Nesting hell with multiple render props |
+| Custom hooks | Sharing stateful logic | Consumer must handle rendering |
+| Composition | Sharing UI + behavior | More components to understand |
+
+In 2026, my hierarchy is: **hooks for logic, composition for UI, render props almost never**.
+
+```tsx
+// ✅ Hook for logic
+function useDisclosure(initial = false) {
+  const [isOpen, setIsOpen] = useState(initial);
+  return {
+    isOpen,
+    onOpen: () => setIsOpen(true),
+    onClose: () => setIsOpen(false),
+    onToggle: () => setIsOpen((prev) => !prev),
+  };
+}
+
+// ✅ Composition for UI
+<Dialog>
+  <DialogTrigger asChild>
+    <Button>Open</Button>
+  </DialogTrigger>
+  <DialogContent>
+    <DialogHeader>Title</DialogHeader>
+    <DialogBody>Content here</DialogBody>
+  </DialogContent>
+</Dialog>
+
+// ⚠️ Render prop — rarely needed now
+<Downshift>
+  {({ getInputProps, getItemProps, isOpen }) => (
+    <div>
+      <input {...getInputProps()} />
+      {isOpen && items.map((item, index) => (
+        <div {...getItemProps({ item, index })}>{item.label}</div>
+      ))}
+    </div>
+  )}
+</Downshift>
+```
+
+The one place render props still shine is **headless UI libraries** where you want to provide behavior without any markup opinion. But even there, hooks are often cleaner.
+
+## When to Break Components Apart
+
+This is more art than science, but here are the signals I look for:
+
+### Split when you see these
+
+1. **The component file is over 300 lines** — size is a code smell for components
+2. **Props are being passed through 3+ levels** — you need context or composition
+3. **You're using `children` and also `headerContent`, `footerContent`** — this is configuration trying to be composition
+4. **The component has multiple `useEffect` calls managing different concerns** — each concern should be its own hook or sub-component
+5. **Conditional rendering is nested 3+ levels deep** — each branch is probably its own component
+
+### Don't split when
+
+1. **The "components" would always be used together** — don't create `ButtonIcon` and `ButtonLabel` if nobody would use them independently
+2. **The state is tightly coupled** — splitting just moves the complexity to the communication between components
+3. **You're splitting to reduce file size, not to reduce complexity** — a 200-line component that does one thing well is fine
+
+## Prop Defaults and the Principle of Least Surprise
+
+Every prop should have a sensible default that represents the most common use case. If 80% of users will pass `variant="primary"`, make `"primary"` the default.
+
+```tsx
+interface ButtonProps {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';  // default: 'primary'
+  size?: 'sm' | 'md' | 'lg';                                 // default: 'md'
+  isFullWidth?: boolean;                                      // default: false
+  isDisabled?: boolean;                                       // default: false
+  type?: 'button' | 'submit' | 'reset';                      // default: 'button'
+}
+```
+
+<Info>
+Note that `type` defaults to `'button'`, not `'submit'`. In HTML, the default is `'submit'`, which causes unexpected form submissions. Overriding this default prevents one of the most common button-in-form bugs.
+</Info>
+
+## The Escape Hatch Pattern
+
+No matter how well you design your API, someone will need to do something you didn't anticipate. Build in escape hatches:
+
+```tsx
+interface CardProps {
+  variant: 'elevated' | 'outlined' | 'flat';
+  children: React.ReactNode;
+  className?: string;       // escape hatch for styling
+  style?: React.CSSProperties;  // another escape hatch
+  // spread remaining props to the root element
+  [key: string]: unknown;
+}
+
+function Card({ variant, children, className, ...rest }: CardProps) {
+  return (
+    <div
+      className={cn(cardVariants({ variant }), className)}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+Spreading `...rest` onto the root element means consumers can add `data-testid`, `aria-*` attributes, event handlers, or anything else without you needing to anticipate it. It's the single most important escape hatch in component design.
+
+## Lessons From the Trenches
+
+After building design system components used by hundreds of engineers across Atlassian and Weel, here's what sticks with me:
+
+1. **Your first API will be wrong.** Ship it, watch how people use it, then iterate. Don't design in a vacuum.
+2. **Deprecation is better than breakage.** When you need to change an API, add the new prop alongside the old one, emit a console warning, and give teams a migration window.
+3. **Documentation is part of the API.** If you can't explain a prop in one sentence, the prop is too complex.
+4. **Study Radix UI, Headless UI, and React Aria.** These libraries represent years of API design thinking. You don't need to invent patterns — you need to adopt proven ones.
+5. **Every prop is a maintenance burden forever.** Before adding a prop, ask: "Will I regret this in two years?" If the answer is maybe, don't add it.
+
+The best component APIs feel invisible. They do what you expect, they prevent you from doing what you shouldn't, and they get out of your way. That's the goal.

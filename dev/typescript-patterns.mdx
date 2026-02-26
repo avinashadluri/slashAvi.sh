@@ -1,0 +1,449 @@
+---
+title: "TypeScript Patterns I Reach For Daily"
+description: "Battle-tested TypeScript patterns for React codebases — discriminated unions, branded types, inference, and the patterns that eliminated entire bug categories."
+---
+
+# TypeScript Patterns I Reach For Daily
+
+I've been writing TypeScript since 2017, back when `strict: true` was considered aggressive and most teams used `any` like a security blanket. Over those years, I've converged on a set of patterns that I reach for in almost every codebase. Not because they're clever — because they eliminate entire categories of bugs.
+
+The philosophy behind all of them is the same: **make illegal states unrepresentable**. If a state shouldn't exist, the type system shouldn't allow it to compile. Every bug caught at compile time is a bug that never reaches production.
+
+## Discriminated Unions for State Machines
+
+This is the single most impactful TypeScript pattern I know. If you take one thing from this page, let it be this.
+
+Consider a component that fetches data. Most codebases model this state like:
+
+```tsx
+interface DataState {
+  data: User[] | null;
+  error: string | null;
+  isLoading: boolean;
+}
+```
+
+This allows impossible states. `isLoading: true` with `data` set and an `error`? The types allow it. `isLoading: false` with both `data` and `error` as null? Technically valid. Every consumer has to defensively check combinations that should never exist.
+
+Discriminated unions fix this:
+
+```tsx
+type DataState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: User[] }
+  | { status: 'error'; error: string };
+```
+
+Now each state carries exactly the data it should. In the `success` state, `data` exists and is non-null — guaranteed. In the `error` state, `error` is a string — guaranteed. There's no `loading` state with data because that combination doesn't exist in the union.
+
+```tsx
+function UserList({ state }: { state: DataState }) {
+  switch (state.status) {
+    case 'idle':
+      return <p>Enter a search term</p>;
+    case 'loading':
+      return <Spinner />;
+    case 'success':
+      // TypeScript knows state.data is User[] here
+      return <ul>{state.data.map(u => <li key={u.id}>{u.name}</li>)}</ul>;
+    case 'error':
+      // TypeScript knows state.error is string here
+      return <Alert variant="error">{state.error}</Alert>;
+  }
+}
+```
+
+TypeScript narrows the type in each branch automatically. No null checks, no assertions, no `data!` non-null assertions.
+
+### Real-world example: payment flow
+
+```tsx
+type PaymentState =
+  | { step: 'selecting_method' }
+  | { step: 'entering_details'; method: PaymentMethod }
+  | { step: 'confirming'; method: PaymentMethod; amount: Money }
+  | { step: 'processing'; transactionId: string }
+  | { step: 'succeeded'; transactionId: string; receipt: Receipt }
+  | { step: 'failed'; transactionId: string; error: PaymentError };
+```
+
+Each step carries the exact context it needs. You can't accidentally access `receipt` during `processing` because it doesn't exist in that branch of the union. This pattern alone has prevented more bugs in my career than any testing strategy.
+
+## Exhaustive Checks: Catching Missing Cases
+
+Discriminated unions pair perfectly with exhaustive checks — a pattern that ensures every possible state is handled.
+
+```tsx
+function assertNever(value: never): never {
+  throw new Error(`Unhandled value: ${JSON.stringify(value)}`);
+}
+
+function getStatusColor(status: DataState['status']): string {
+  switch (status) {
+    case 'idle': return 'gray';
+    case 'loading': return 'blue';
+    case 'success': return 'green';
+    case 'error': return 'red';
+    default: return assertNever(status);
+  }
+}
+```
+
+If someone adds a new status to the union — say `'retrying'` — the `assertNever` call will produce a **compile error** at every switch statement that doesn't handle it. You find every place that needs updating without searching.
+
+<Tip>
+I add `assertNever` to every project's utility library on day one. It's a one-liner that pays for itself within a week.
+</Tip>
+
+## Branded Types for IDs
+
+Here's a bug I've seen in every codebase that doesn't use branded types:
+
+```tsx
+function assignTask(userId: string, taskId: string) { ... }
+
+// Oops — arguments are swapped, but TypeScript is perfectly happy
+assignTask(taskId, userId);
+```
+
+Both parameters are `string`. TypeScript can't tell them apart. Branded types fix this by creating distinct string types that are incompatible with each other:
+
+```tsx
+type UserId = string & { readonly __brand: 'UserId' };
+type TaskId = string & { readonly __brand: 'TaskId' };
+type TeamId = string & { readonly __brand: 'TeamId' };
+
+function userId(id: string): UserId { return id as UserId; }
+function taskId(id: string): TaskId { return id as TaskId; }
+
+function assignTask(userId: UserId, taskId: TaskId) { ... }
+
+const user = userId('user_123');
+const task = taskId('task_456');
+
+assignTask(user, task);  // ✅ Correct
+assignTask(task, user);  // ❌ Compile error!
+```
+
+The `__brand` property never exists at runtime — it's purely a compile-time marker. But it prevents an entire class of argument-swapping bugs.
+
+### Scaling branded types
+
+For larger codebases, I use a generic helper:
+
+```tsx
+type Brand<T, B extends string> = T & { readonly __brand: B };
+
+type UserId = Brand<string, 'UserId'>;
+type TaskId = Brand<string, 'TaskId'>;
+type Cents = Brand<number, 'Cents'>;
+type Dollars = Brand<number, 'Dollars'>;
+type EmailAddress = Brand<string, 'EmailAddress'>;
+
+// Prevents accidentally mixing up monetary amounts
+function chargeCents(amount: Cents): void { ... }
+chargeCents(500 as Cents);       // ✅
+chargeCents(5 as Dollars);       // ❌ Compile error!
+chargeCents(500);                 // ❌ Compile error!
+```
+
+<Warning>
+Branded types add cognitive overhead. Use them for IDs that cross module boundaries (userId, orderId, transactionId) and for domain values where mixing up units causes real bugs (money, measurements). Don't brand every string in your codebase.
+</Warning>
+
+## Const Assertions for Literal Types
+
+`as const` is one of TypeScript's most underused features. It narrows types to their literal values and makes objects deeply readonly.
+
+```tsx
+// Without as const — types are wide
+const ROUTES = {
+  home: '/',
+  dashboard: '/dashboard',
+  settings: '/settings',
+};
+// type: { home: string; dashboard: string; settings: string }
+
+// With as const — types are narrow
+const ROUTES = {
+  home: '/',
+  dashboard: '/dashboard',
+  settings: '/settings',
+} as const;
+// type: { readonly home: '/'; readonly dashboard: '/dashboard'; readonly settings: '/settings' }
+```
+
+This matters because you can now derive types from the constant:
+
+```tsx
+type Route = typeof ROUTES[keyof typeof ROUTES];
+// type Route = '/' | '/dashboard' | '/settings'
+
+function navigate(route: Route) { ... }
+
+navigate(ROUTES.home);     // ✅
+navigate('/unknown');       // ❌ Compile error
+```
+
+The constant is the single source of truth. The type is derived from it. You never have a type and a constant that can fall out of sync.
+
+### Array constants
+
+```tsx
+const STATUSES = ['draft', 'published', 'archived'] as const;
+type Status = typeof STATUSES[number];
+// type Status = 'draft' | 'published' | 'archived'
+
+// Useful for runtime validation
+function isValidStatus(s: string): s is Status {
+  return (STATUSES as readonly string[]).includes(s);
+}
+```
+
+## Template Literal Types
+
+Template literal types let you create string types from combinations, which is powerful for API design:
+
+```tsx
+type EventName = `${'click' | 'hover' | 'focus'}.${'button' | 'input' | 'link'}`;
+// "click.button" | "click.input" | "click.link" | "hover.button" | ...
+
+type CSSProperty = `--${string}`;  // any CSS custom property
+
+type APIRoute = `/api/v${1 | 2}/${'users' | 'tasks' | 'teams'}`;
+// "/api/v1/users" | "/api/v1/tasks" | ... | "/api/v2/teams"
+```
+
+A practical use case — type-safe event tracking:
+
+```tsx
+type TrackingEvent =
+  | `page.${string}`
+  | `button.${string}.clicked`
+  | `form.${string}.submitted`
+  | `error.${string}.occurred`;
+
+function track(event: TrackingEvent, properties?: Record<string, unknown>) {
+  analytics.track(event, properties);
+}
+
+track('button.checkout.clicked');        // ✅
+track('form.signup.submitted');          // ✅
+track('something_random');               // ❌ Compile error
+```
+
+## Inference Helpers: Let TypeScript Do the Work
+
+One of TypeScript's superpowers is type inference. The best TypeScript code has *fewer* type annotations, not more, because the compiler infers what it needs.
+
+### `satisfies` — validate without widening
+
+The `satisfies` operator (TypeScript 4.9+) is one of my most-used features:
+
+```tsx
+type RouteConfig = {
+  path: string;
+  auth: boolean;
+  roles?: ('admin' | 'editor' | 'viewer')[];
+};
+
+// With `satisfies`, TypeScript validates the shape but preserves literal types
+const routes = {
+  home: { path: '/', auth: false },
+  dashboard: { path: '/dashboard', auth: true, roles: ['admin', 'editor'] },
+  settings: { path: '/settings', auth: true, roles: ['admin'] },
+} satisfies Record<string, RouteConfig>;
+
+// routes.dashboard.path is type '/dashboard', not string
+// routes.dashboard.roles is type ('admin' | 'editor')[], not ('admin' | 'editor' | 'viewer')[]
+```
+
+Without `satisfies`, you'd either lose literal types (using a type annotation) or lose validation (using `as const` alone). `satisfies` gives you both.
+
+### Generic inference in functions
+
+Write functions that infer types from arguments rather than requiring explicit type parameters:
+
+```tsx
+// ❌ Requires explicit type parameter
+function createStore<T>(initial: T): Store<T> { ... }
+const store = createStore<{ count: number; name: string }>({ count: 0, name: '' });
+
+// ✅ Infers from the argument
+function createStore<T extends Record<string, unknown>>(initial: T): Store<T> {
+  return {
+    get: <K extends keyof T>(key: K): T[K] => initial[key],
+    set: <K extends keyof T>(key: K, value: T[K]) => { initial[key] = value; },
+  };
+}
+
+const store = createStore({ count: 0, name: '' });
+store.get('count');    // inferred as number
+store.set('name', 42); // ❌ Compile error — expects string
+```
+
+## Zod + TypeScript: Runtime Meets Compile Time
+
+Type safety at compile time is half the battle. Data that enters your application from APIs, forms, URL params, or local storage has no compile-time guarantees. Zod bridges the gap.
+
+```tsx
+import { z } from 'zod';
+
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+  role: z.enum(['admin', 'editor', 'viewer']),
+  createdAt: z.string().datetime(),
+});
+
+// Derive the TypeScript type from the schema
+type User = z.infer<typeof UserSchema>;
+
+// Runtime validation at the boundary
+async function fetchUser(id: string): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+  const data = await response.json();
+  return UserSchema.parse(data); // throws if invalid
+}
+```
+
+The critical insight: **define the schema once, derive the type**. The Zod schema is the single source of truth. The TypeScript type is always in sync because it's derived, not duplicated.
+
+### Zod for form validation
+
+```tsx
+const SignupSchema = z.object({
+  email: z.string().email('Please enter a valid email'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain an uppercase letter')
+    .regex(/[0-9]/, 'Password must contain a number'),
+  confirmPassword: z.string(),
+}).refine(data => data.password === data.confirmPassword, {
+  message: 'Passwords must match',
+  path: ['confirmPassword'],
+});
+
+type SignupForm = z.infer<typeof SignupSchema>;
+```
+
+This schema works for both React Hook Form validation and server-side validation. Write it once, use it everywhere.
+
+### Zod for API response validation
+
+```tsx
+const PaginatedResponseSchema = <T extends z.ZodType>(itemSchema: T) =>
+  z.object({
+    items: z.array(itemSchema),
+    total: z.number().int().nonneg(),
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+    hasNext: z.boolean(),
+  });
+
+const UsersResponseSchema = PaginatedResponseSchema(UserSchema);
+type UsersResponse = z.infer<typeof UsersResponseSchema>;
+```
+
+<Info>
+Validate at the boundaries of your application — API responses, form submissions, URL params, localStorage reads. Once data passes validation, it's trusted throughout the rest of your code. This is the "parse, don't validate" philosophy.
+</Info>
+
+## The "Make Illegal States Unrepresentable" Philosophy
+
+This phrase, originally from Yaron Minsky in the context of OCaml, is the north star of my TypeScript work. Every time I design a type, I ask: "Does this type allow states that shouldn't exist?"
+
+### Example: notification preferences
+
+```tsx
+// ❌ Allows illegal combinations
+interface NotificationPrefs {
+  emailEnabled: boolean;
+  emailAddress: string | null;
+  smsEnabled: boolean;
+  phoneNumber: string | null;
+}
+// Legal but meaningless: { emailEnabled: true, emailAddress: null, ... }
+
+// ✅ Illegal states are unrepresentable
+type NotificationPrefs = {
+  email: { enabled: false } | { enabled: true; address: string };
+  sms: { enabled: false } | { enabled: true; phoneNumber: string };
+};
+```
+
+If email is enabled, an address is required — enforced by the type, not by runtime validation.
+
+### Example: permission system
+
+```tsx
+// ❌ What does admin: true, editor: true mean?
+interface Permissions {
+  admin: boolean;
+  editor: boolean;
+  viewer: boolean;
+}
+
+// ✅ One role, clearly defined capabilities
+type Role = 'admin' | 'editor' | 'viewer';
+
+type Permissions = {
+  role: Role;
+  capabilities: RoleCapabilities[Role];
+};
+
+interface RoleCapabilities {
+  admin: { canDelete: true; canEdit: true; canView: true };
+  editor: { canDelete: false; canEdit: true; canView: true };
+  viewer: { canDelete: false; canEdit: false; canView: true };
+}
+```
+
+## Utility Patterns I Copy Into Every Project
+
+These small utilities prevent recurring bugs:
+
+```tsx
+// Ensure all cases of a union are handled
+function assertNever(value: never): never {
+  throw new Error(`Unhandled: ${JSON.stringify(value)}`);
+}
+
+// Type-safe Object.keys
+function typedKeys<T extends object>(obj: T): (keyof T)[] {
+  return Object.keys(obj) as (keyof T)[];
+}
+
+// Type-safe Object.entries
+function typedEntries<T extends object>(obj: T): [keyof T, T[keyof T]][] {
+  return Object.entries(obj) as [keyof T, T[keyof T]][];
+}
+
+// NonNullable filter that TypeScript actually narrows
+function isNotNull<T>(value: T | null | undefined): value is T {
+  return value != null;
+}
+
+// Usage: array.filter(isNotNull) — TypeScript narrows the resulting array
+const users: (User | null)[] = [user1, null, user2];
+const validUsers: User[] = users.filter(isNotNull); // correctly typed
+```
+
+## What I've Stopped Doing
+
+Equally important are the patterns I've abandoned:
+
+1. **Enums** — I use `as const` objects or union types instead. Enums have surprising runtime behavior and don't play well with `satisfies`.
+2. **`namespace`** — Just use modules. Namespaces are a TypeScript-specific construct that confuses tooling.
+3. **`interface extends` chains deeper than 2 levels** — Deep inheritance hierarchies are as bad in types as in classes. Prefer composition with intersection types.
+4. **Excessive generics** — If a generic type parameter is only used once, you probably don't need it. Generics should constrain relationships between values, not add abstraction for its own sake.
+5. **Type assertions (`as`)** — Every `as` is a lie to the compiler. I treat them like `// @ts-ignore` — sometimes necessary, always suspicious. If I need more than 2 assertions in a file, my types are wrong.
+
+<Warning>
+TypeScript's type system is powerful enough to implement a Turing machine. That doesn't mean you should. If a type takes more than 30 seconds to read and understand, it's too complex. Simplify the type or simplify the code that needs it.
+</Warning>
+
+These patterns aren't about being clever with types. They're about encoding your domain knowledge into the type system so that the compiler catches mistakes that humans miss. Every bug caught at compile time is a bug that never wakes anyone up at 3 AM.

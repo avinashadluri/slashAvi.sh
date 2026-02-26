@@ -1,0 +1,206 @@
+---
+title: "The Decision Journal"
+description: "How I document decisions to learn from them — a simple practice that dramatically improved my judgment over 3 years."
+---
+
+# The Decision Journal
+
+> _"The quality of your decisions determines the quality of your life — but only if you remember what you decided and why."_
+
+## What Is a Decision Journal?
+
+A decision journal is a structured log where you record significant decisions at the time you make them — before you know the outcome. You capture the context, your reasoning, your emotional state, and your expected results. Then, weeks or months later, you come back and record what actually happened.
+
+The practice sounds simple. It is simple. And it has dramatically improved my judgment over three years of consistent use.
+
+The insight behind it comes from a problem that plagues everyone from engineers to executives: **we can't learn from decisions we don't remember making.** Our brains are narrative-constructing machines. Once we know the outcome, we retroactively rewrite the story to make it seem like the result was obvious — or inevitable. This is hindsight bias, and it's the single biggest barrier to learning from experience.
+
+A decision journal defeats hindsight bias by freezing your thinking at the moment of decision, before the outcome contaminates your memory.
+
+I first encountered this idea through Daniel Kahneman's work (see [Thinking, Fast and Slow](/books/thinking-fast-slow)) and Shane Parrish's writing at Farnam Street. The practice itself is ancient — Marcus Aurelius was essentially keeping a decision journal in his *Meditations*. I've adapted the format for both engineering and life decisions.
+
+## My Template
+
+Every decision journal entry follows the same structure. Consistency is important — it allows pattern recognition across entries over time.
+
+### At Decision Time
+
+| Field | What I Record |
+|---|---|
+| **Date** | When the decision was made |
+| **Decision** | One sentence: what I decided |
+| **Context** | What's happening? What constraints exist? What information do I have — and what's missing? |
+| **Options considered** | What alternatives did I evaluate? Why did I reject them? |
+| **Expected outcome** | What do I think will happen? Be specific and time-bound |
+| **Confidence level** | How sure am I? (50%, 70%, 90%) |
+| **Emotional state** | Am I calm? Anxious? Excited? Pressured? Fatigued? |
+| **What would change my mind** | What evidence, if it appeared, would make me reverse this decision? |
+
+### At Review Time (30-90 days later)
+
+| Field | What I Record |
+|---|---|
+| **Actual outcome** | What actually happened? |
+| **Decision quality** | Knowing what I knew then, was this a good decision — regardless of outcome? |
+| **What I missed** | What information was available but I overlooked? What was genuinely unknowable? |
+| **Lessons** | What do I take forward? |
+
+The separation between decision quality and outcome quality is the most important feature of this system. A good decision can have a bad outcome (you made the right call with the available information, but unlikely events occurred). A bad decision can have a good outcome (you got lucky). The journal helps me distinguish between the two, which is the foundation of improving judgment over time.
+
+<Info>
+The emotional state field is the one most people skip — and the one I find most valuable. Over three years, I've noticed clear patterns: decisions I make while fatigued or under social pressure have significantly worse outcomes than decisions I make when rested and deliberate. The data changed my behavior — I now postpone significant decisions if I notice I'm in a compromised emotional state.
+</Info>
+
+## Engineering Decisions
+
+About 60% of my journal entries are engineering decisions. Here are real examples (details anonymized):
+
+### Example 1: Database Migration
+
+**Decision:** Migrate from PostgreSQL to a managed database service for the payments microservice.
+
+**Context:** Current self-managed Postgres is stable but requires significant ops effort. Team is scaling and doesn't want to hire a dedicated DBA. Managed service costs more but offloads operational burden.
+
+**Options:**
+- Stay on self-managed Postgres (lowest cost, highest ops burden)
+- Migrate to managed Postgres (moderate cost, low ops burden)
+- Migrate to a different managed database entirely (highest cost, lowest ops burden, highest migration risk)
+
+**Expected outcome:** Migration completes in 6 weeks with one week of performance tuning. Ops burden drops by ~80%. Cost increases by ~40%.
+
+**Confidence:** 65%. The timeline feels optimistic. Data migration always has surprises.
+
+**Emotional state:** Tired of oncall alerts. Might be biased toward "anything that reduces pages."
+
+**What would change my mind:** If the managed service can't match our current query performance within 20%, or if the migration surface area is larger than estimated.
+
+**Actual outcome (reviewed 4 months later):** Migration took 11 weeks, not 6. Performance was fine after tuning. Ops burden dropped as expected. Cost increase was 55%, not 40%.
+
+**Decision quality:** Good decision, overconfident timeline. The "65% confidence, feels optimistic" note was honest — I should have acted on that honesty and communicated the uncertainty more explicitly to stakeholders.
+
+**Lesson:** When I write "this feels optimistic" in the confidence field, multiply the timeline by 1.7x and share that number externally.
+
+### Example 2: Framework Choice
+
+**Decision:** Adopt React Server Components for the new internal dashboard.
+
+**Context:** Team has React experience. RSC is new but aligns with our direction. Could use a simpler SSR approach instead. The dashboard is internal-facing, so risk tolerance is higher.
+
+**Options:**
+- Traditional React SPA (safe, proven, but heavier client bundle)
+- Next.js with RSC (modern, better performance, but less team familiarity)
+- Svelte (great DX, but nobody on the team knows it)
+
+**Expected outcome:** Initial velocity slower due to learning curve, but pays off within 3 months as the team internalizes the mental model.
+
+**Confidence:** 55%. RSC patterns are still evolving. Documentation is thin.
+
+**Emotional state:** Excited about the tech. Need to check if I'm choosing this because it's the right tool or because it's the interesting tool.
+
+**What would change my mind:** If the learning curve takes more than 6 weeks to overcome, or if critical functionality requires workarounds that negate the performance benefits.
+
+**Actual outcome (reviewed 5 months later):** Learning curve was steeper than expected — about 8 weeks, not 3. But the performance benefits were real and the team now prefers it. One engineer struggled significantly and had to be paired for an extra month.
+
+**Decision quality:** Reasonable decision, but I underweighted the learning curve cost and the impact on the team member who struggled. The "excited about the tech" note in emotional state was a valid warning I didn't take seriously enough.
+
+**Lesson:** When adopting new technology, my excitement is a leading indicator of overconfidence about adoption difficulty. Budget 2x the learning curve I estimate.
+
+## Life Decisions
+
+About 40% of my entries are life decisions. Career moves, financial choices, relationship decisions, health commitments.
+
+### Example 3: Staying vs. Leaving a Job
+
+**Decision:** Stay at current company for another year despite receiving an offer at 25% higher compensation.
+
+**Context:** Current role offers growth into staff-level work. New offer is a lateral move with more money but less technical challenge. Family is settled; changing jobs means changing routines.
+
+**Options:**
+- Accept the offer (higher comp, less growth)
+- Stay and negotiate a raise (moderate comp improvement, continued growth path)
+- Stay without negotiating (no change)
+
+**Expected outcome:** The staff promotion will come within 12 months if I execute the plan. The long-term comp trajectory will exceed the new offer's short-term bump.
+
+**Confidence:** 70%. The promotion path is clear, but organizational changes could derail it.
+
+**Emotional state:** Flattered by the offer. Anxious about turning down money. My ego wants the validation of being "worth" that salary.
+
+**What would change my mind:** If the promotion path becomes blocked due to org changes, or if the current company's financial health deteriorates.
+
+**Actual outcome (reviewed 14 months later):** Promotion came through at month 11. Total comp after promotion exceeded the outside offer by 15%. The growth and learning were invaluable — I wouldn't have the depth I have now at the other company.
+
+**Decision quality:** Good decision. The emotional state note was key — recognizing that the ego-flattery of the offer was influencing my thinking helped me evaluate the options more clearly.
+
+**Lesson:** Short-term compensation bumps from lateral moves are almost always outweighed by the long-term compound value of growth in a role where you're leveling up.
+
+## Reviewing Past Decisions Quarterly
+
+The capture phase is valuable, but the **review phase is where learning happens.** Every quarter, I set aside 90 minutes to review all decision journal entries from the prior quarter.
+
+**My quarterly review process:**
+
+1. **Re-read each entry** — both the decision-time capture and the outcome review.
+2. **Look for patterns** — Am I systematically overconfident? Do I make worse decisions under time pressure? Do decisions in certain domains (hiring, architecture, financial) have different error profiles?
+3. **Update my base rates** — If I said "70% confident" ten times and was right seven of those times, I'm well-calibrated. If I was right four times, I'm overconfident. The data tells me how much to trust my own confidence levels.
+4. **Extract meta-lessons** — These are lessons about how I decide, not about specific decisions. They go into a separate "Decision Patterns" note that I review before making any major decision.
+
+### Patterns I've Discovered About Myself
+
+After three years and roughly 120 entries:
+
+| Pattern | What I Learned | What I Changed |
+|---|---|---|
+| **Timeline optimism** | I underestimate by 40-60% for technical projects | I apply a 1.5-1.7x multiplier to my initial estimates |
+| **Fatigue bias** | Decisions made after 7pm or during crunch periods are measurably worse | I postpone significant decisions when I notice fatigue |
+| **Excitement overconfidence** | When I'm excited about a technical choice, I underweight adoption costs by ~2x | I assign a "reality check" partner for decisions I'm excited about |
+| **Social pressure capitulation** | In rooms with strong opinions, I sometimes agree to avoid conflict | I write my position down BEFORE meetings where group decisions will be made |
+| **Loss aversion in tech decisions** | I hold onto failing approaches 2-3 weeks longer than I should | I set "kill criteria" in advance — concrete conditions for stopping |
+
+<Tip>
+The meta-patterns are more valuable than any individual lesson. Knowing that you systematically overestimate timelines when excited is worth more than knowing that one specific project was late. The former is a permanent upgrade to your judgment; the latter is an anecdote.
+</Tip>
+
+## Separating Decision Quality from Outcome Quality
+
+This is the conceptual foundation of the entire practice, and it's counterintuitive.
+
+**Good decisions can have bad outcomes.** You can do everything right — gather information, evaluate options, manage risk — and still fail because of factors outside your control. The decision was still good. If you'd make the same call with the same information again, the process was sound.
+
+**Bad decisions can have good outcomes.** You can wing it, ignore data, go with your gut in a domain where your gut has no training, and get lucky. The outcome was good, but the process was broken. If you repeat that process, you'll eventually lose — and probably lose big.
+
+The decision journal separates these two things by capturing the decision in its original context, before the outcome rewrites the narrative. When I review entries, I evaluate the process first and the outcome second. A "lucky" good outcome doesn't validate sloppy thinking. An "unlucky" bad outcome doesn't invalidate rigorous analysis.
+
+**Why this matters for engineering leaders:** Most organizations evaluate people based on outcomes, not decision quality. The project that shipped on time gets praised; the project that was well-reasoned but hit external blockers gets criticized. Over time, this incentivizes lucky risk-taking over thoughtful analysis. The decision journal is a private tool for self-evaluation on the axis that actually matters.
+
+## How to Start
+
+If you want to try this:
+
+1. **Start small.** Don't journal every decision. Start with one significant decision per week — something where the outcome matters and uncertainty exists.
+2. **Use the template.** Structure prevents procrastination. A blank page is intimidating; a template with fields to fill is not.
+3. **Set a calendar reminder for reviews.** If you don't schedule the quarterly review, it won't happen. I block 90 minutes on the last Friday of every quarter.
+4. **Be honest in the emotional state field.** This is private. Nobody else reads it. If you're anxious, say so. If you're excited, say so. If you're making this decision to avoid a harder one, say that too.
+5. **Don't expect immediate results.** The value compounds over months. The first quarter's review is interesting. The second is insightful. The third year's review is transformational — because by then you have enough data to see your own systematic patterns.
+
+I use a Notion database for this. Each entry is a row. The fields map to the template above. I tag entries by domain (engineering, career, financial, personal) and by confidence level, which makes pattern analysis easier during reviews.
+
+## What Changed After 3 Years
+
+1. **My calibration improved dramatically.** When I say "70% confident," I mean it — and my outcomes match that rate. This wasn't true when I started. I was systematically overconfident at every level.
+2. **I make fewer impulsive decisions.** The act of writing forces deliberation. Several times, filling out the journal template made me realize I was about to make a poorly reasoned decision, and I stopped.
+3. **I'm more comfortable with uncertainty.** Tracking confidence levels explicitly made me realize that most decisions are made at 55-70% confidence. That's normal. Waiting for 95% confidence is a luxury you rarely have and a form of procrastination.
+4. **I've built a personal knowledge base of decision patterns** that I consult before major decisions. It's like having a conversation with my past selves — all the versions of me who faced similar choices and learned from them.
+5. **I judge others' decisions more fairly.** Understanding that outcome quality and decision quality are different made me more empathetic as a leader. When a teammate's project fails despite good reasoning, I can see that — and credit the thinking even while addressing the outcome.
+
+## Key Principles
+
+- **Write at decision time, not after.** Hindsight bias corrupts within days.
+- **Be specific about expected outcomes.** "This will go well" is useless. "This will complete in 6 weeks, cost $X, and reduce ops burden by Y%" is useful.
+- **Track confidence numerically.** "Fairly confident" is vague. "70%" is measurable and calibratable.
+- **Review on a schedule.** Capture without review is just journaling. Review is where the learning lives.
+- **Separate process from outcome.** This is the hardest and most important discipline.
+
+<Note>
+Pairs well with: [Thinking, Fast and Slow](/books/thinking-fast-slow) for understanding the biases the journal catches, [Mental Models for Engineering Leaders](/thinkish/mental-models-engineering) for the frameworks that inform better decisions, and [Thinking Frameworks](/thinkish/frameworks) for the meta-cognitive toolkit.
+</Note>

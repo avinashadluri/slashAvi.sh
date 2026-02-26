@@ -1,0 +1,381 @@
+---
+title: "Running Local LLMs: The Practical Guide"
+description: "How to run LLMs locally with Ollama, llama.cpp, and open-weight models — when it makes sense and when it doesn't."
+---
+
+# Running Local LLMs: The Practical Guide
+
+I run local models every day. Not because I'm an AI purist or because I think OpenAI is evil. I run them because for certain workloads, local inference is faster, cheaper, more private, and more reliable than any API. And for other workloads, it's absolutely the wrong choice.
+
+This guide covers when local makes sense, how to set it up, which models to run, and the reality of performance versus API-hosted models. No ideology — just pragmatics.
+
+## Why Local Matters
+
+There are exactly four reasons to run LLMs locally. If your use case doesn't fit at least one, use an API.
+
+### 1. Privacy
+
+Some data should never leave your machine. Medical records, financial documents, proprietary code, customer PII. When I'm building features that process sensitive data during development, I prototype with a local model first. The data never hits an external server.
+
+This isn't paranoia — it's compliance. If you work in finance (like I do at Weel), healthcare, or government, data residency matters. A local model running on your hardware is the simplest way to guarantee it.
+
+### 2. Cost
+
+API costs are usage-proportional. At low volume, they're a rounding error. At high volume, they're a line item your CFO asks about.
+
+A back-of-envelope comparison:
+
+| Scenario | API Cost (GPT-4o-mini) | Local Cost (Llama 3.1 8B) |
+|---|---|---|
+| 1K requests/day | ~$3/day | ~$0 (hardware amortized) |
+| 10K requests/day | ~$30/day | ~$0 |
+| 100K requests/day | ~$300/day | ~$0 |
+| Hardware (one-time) | $0 | M4 Mac Mini: ~$900 |
+
+The break-even point depends on your volume, but for sustained high-throughput workloads, local wins decisively within weeks.
+
+### 3. Latency
+
+No network round-trip. No queue. No rate limit. For interactive applications where you control the hardware, local inference can be faster than API calls — especially for smaller models.
+
+On my M3 Max MacBook Pro, Llama 3.1 8B generates at ~60 tokens/second. That's fast enough for real-time applications.
+
+### 4. Offline Capability
+
+API goes down? Rate limited? On a plane? Local models keep working. For developer tools and personal productivity apps, this matters more than you'd think.
+
+## Hardware Requirements
+
+Let me be blunt: you need either an Apple Silicon Mac or a machine with a decent GPU. Running LLMs on CPU-only is technically possible but practically useless for anything interactive.
+
+### Apple Silicon Macs (My Recommendation)
+
+Apple's unified memory architecture is perfect for LLMs. The model weights sit in memory that both the CPU and GPU can access, avoiding the PCIe bottleneck that plagues discrete GPUs.
+
+| Mac | Memory | Largest Model (Quantized) | Performance |
+|---|---|---|---|
+| M1/M2 (8GB) | 8GB | 7B Q4 (tight) | ~20 tok/s |
+| M1/M2 Pro (16GB) | 16GB | 13B Q4 | ~25 tok/s |
+| M3/M4 Pro (36GB) | 36GB | 34B Q4 or 70B Q3 | ~30-40 tok/s |
+| M3/M4 Max (64GB) | 64GB | 70B Q5 | ~35-45 tok/s |
+| M2/M3 Ultra (192GB) | 192GB | 405B Q4 | ~15-20 tok/s |
+
+<Tip>
+Memory is the bottleneck, not compute. When buying a Mac for local LLMs, max out the RAM. The difference between 36GB and 64GB is the difference between running a 34B model and a 70B model.
+</Tip>
+
+### NVIDIA GPUs
+
+If you're on Linux or Windows, you want an NVIDIA GPU with as much VRAM as possible.
+
+| GPU | VRAM | Largest Model | Approx. Cost |
+|---|---|---|---|
+| RTX 3060 | 12GB | 7B Q4 | ~$250 used |
+| RTX 4070 Ti | 16GB | 13B Q4 | ~$700 |
+| RTX 4090 | 24GB | 34B Q4 | ~$1,600 |
+| A100 (datacenter) | 80GB | 70B Q5 | ~$10K |
+
+For hobbyists and developers, the RTX 4090 is the sweet spot. For production, rent GPU instances from Lambda, RunPod, or vast.ai.
+
+## Ollama: The Easiest Way to Start
+
+Ollama is the Docker of local LLMs. It abstracts away the complexity of model management, quantization, and inference backends.
+
+### Installation
+
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Or on macOS with Homebrew
+brew install ollama
+```
+
+### Basic Usage
+
+```bash
+# Pull a model
+ollama pull llama3.1:8b
+
+# Run interactively
+ollama run llama3.1:8b
+
+# List installed models
+ollama list
+
+# Serve the API (starts automatically, but can be explicit)
+ollama serve
+```
+
+### API Usage
+
+Ollama exposes an OpenAI-compatible API on `localhost:11434`.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:11434/v1",
+    api_key="ollama"  # required but ignored
+)
+
+response = client.chat.completions.create(
+    model="llama3.1:8b",
+    messages=[
+        {"role": "system", "content": "You are a helpful coding assistant."},
+        {"role": "user", "content": "Write a Python function to merge two sorted lists."}
+    ],
+    temperature=0
+)
+
+print(response.choices[0].message.content)
+```
+
+The OpenAI-compatible API is the killer feature. It means you can swap between local and hosted models by changing one line — the base URL. Your application code stays the same.
+
+```typescript
+// Switch between local and hosted with an env var
+const client = new OpenAI({
+  baseURL: process.env.LLM_BASE_URL || "https://api.openai.com/v1",
+  apiKey: process.env.LLM_API_KEY || "ollama"
+});
+```
+
+### Modelfiles: Custom Configurations
+
+You can create custom model configurations with Modelfiles.
+
+```dockerfile
+# Modelfile for a code review assistant
+FROM llama3.1:8b
+
+SYSTEM """You are a senior software engineer reviewing code.
+Focus on: bugs, security issues, performance problems, and readability.
+Be direct and specific. No fluff."""
+
+PARAMETER temperature 0.1
+PARAMETER num_ctx 8192
+```
+
+```bash
+ollama create code-reviewer -f Modelfile
+ollama run code-reviewer
+```
+
+## Model Selection Guide
+
+Not all open-weight models are created equal. Here's my opinionated ranking for practical use.
+
+### General Purpose
+
+**Llama 3.1 8B** — My default. Fast, capable enough for most tasks, runs comfortably on 8GB+ RAM. If you're starting with local models, start here.
+
+**Llama 3.1 70B** — When you need GPT-4-class reasoning locally. Requires 40GB+ RAM (quantized). Worth it for complex tasks.
+
+**Mistral 7B / Mixtral 8x7B** — Mistral 7B punches above its weight. Mixtral uses mixture-of-experts, giving you near-70B quality at faster speeds (but needs more RAM than a pure 7B).
+
+### Code-Focused
+
+**DeepSeek Coder V2** — The best open-weight model for code, in my experience. Available at various sizes. The 16B version is outstanding for its size.
+
+**CodeLlama 34B** — Solid for code completion and generation. Good at following coding conventions.
+
+```bash
+ollama pull deepseek-coder-v2:16b
+ollama pull codellama:34b
+```
+
+### Small and Fast
+
+**Phi-3 Mini (3.8B)** — Microsoft's small model is remarkably capable for its size. Great for on-device inference and simple tasks.
+
+**Gemma 2 9B** — Google's model. Strong at instruction following, good for structured output tasks.
+
+```bash
+ollama pull phi3:mini
+ollama pull gemma2:9b
+```
+
+### My Daily Setup
+
+```bash
+# Models I keep loaded
+ollama pull llama3.1:8b        # General tasks, chat, brainstorming
+ollama pull deepseek-coder-v2:16b  # Code generation and review
+ollama pull nomic-embed-text   # Embeddings for local RAG
+```
+
+## Quantization: Making Models Fit
+
+Quantization reduces model precision from 16-bit floating point to lower bit-widths. It makes models smaller and faster at the cost of some quality.
+
+Here's the practical reality:
+
+| Quantization | Quality Loss | Size Reduction | Speed Impact | My Take |
+|---|---|---|---|---|
+| Q8 (8-bit) | Minimal | ~50% | Slightly faster | Use when RAM allows |
+| Q5 (5-bit) | Small | ~65% | Faster | Good default |
+| Q4 (4-bit) | Noticeable | ~75% | Much faster | Best bang for buck |
+| Q3 (3-bit) | Significant | ~80% | Fastest | Only for huge models on limited RAM |
+| Q2 (2-bit) | Severe | ~85% | Fastest | Don't bother |
+
+**My rule**: Use Q5 or Q4_K_M for most models. The quality loss is barely noticeable for practical tasks. If you can fit Q8, great, but Q4_K_M is the sweet spot.
+
+In Ollama, quantization levels are part of the model tag:
+
+```bash
+ollama pull llama3.1:8b         # Default quantization (usually Q4_K_M)
+ollama pull llama3.1:8b-q8_0    # 8-bit quantization
+ollama pull llama3.1:8b-q4_K_M  # 4-bit quantization (recommended)
+```
+
+<Info>
+The `_K_M` suffix means "k-quant medium" — a quantization method that preserves quality in the most important layers while compressing others more aggressively. Always prefer `_K_M` variants when available.
+</Info>
+
+## Benchmarking: Local vs API
+
+I ran my own benchmarks because published benchmarks rarely match real-world conditions. Here's what I found on my M3 Max (36GB) with typical development tasks.
+
+### Code Generation (Write a React component)
+
+| Model | Time to First Token | Total Time | Quality (1-5) |
+|---|---|---|---|
+| GPT-4o (API) | ~800ms | ~3.5s | 5 |
+| Claude 3.5 Sonnet (API) | ~1.2s | ~4s | 5 |
+| Llama 3.1 8B (local) | ~100ms | ~2s | 3.5 |
+| DeepSeek Coder V2 16B (local) | ~150ms | ~3.5s | 4 |
+| GPT-4o-mini (API) | ~400ms | ~2s | 4 |
+
+### Summarization (1000-word article)
+
+| Model | Time | Quality (1-5) |
+|---|---|---|
+| GPT-4o-mini (API) | ~2s | 4.5 |
+| Llama 3.1 8B (local) | ~1.5s | 3.5 |
+| Gemma 2 9B (local) | ~1.8s | 4 |
+
+### Classification (Sentiment analysis)
+
+| Model | Time | Accuracy |
+|---|---|---|
+| GPT-4o-mini (API) | ~500ms | 94% |
+| Llama 3.1 8B (local) | ~200ms | 89% |
+| Phi-3 Mini (local) | ~100ms | 86% |
+
+The takeaway: local models are competitive on speed and good enough on quality for many tasks. They are not competitive with frontier models on complex reasoning. Choose accordingly.
+
+## Use Cases Where Local Wins
+
+After a year of running local models, these are the scenarios where I always reach for local:
+
+**Development-time code assistance**: Quick completions, docstring generation, test scaffolding. The latency advantage of local makes the experience feel instant.
+
+**Data processing pipelines**: Classifying, extracting, summarizing thousands of documents. Zero marginal cost per inference means you can iterate freely.
+
+**Personal knowledge bases**: Local RAG over my notes, documents, and bookmarks. My data stays on my machine.
+
+```python
+# Local RAG pipeline — all on-device
+from ollama import Client
+
+client = Client()
+
+# Embed the query
+query_embedding = client.embeddings(
+    model="nomic-embed-text",
+    prompt="How does our authentication flow work?"
+)
+
+# Search local vector store (using chromadb locally)
+results = collection.query(
+    query_embeddings=[query_embedding["embedding"]],
+    n_results=5
+)
+
+# Generate answer with local model
+context = "\n\n".join(results["documents"][0])
+response = client.chat(
+    model="llama3.1:8b",
+    messages=[
+        {"role": "system", "content": f"Answer based on this context:\n{context}"},
+        {"role": "user", "content": "How does our authentication flow work?"}
+    ]
+)
+```
+
+**Offline development**: On flights, in cafes with bad WiFi, or when the API is down. Having a capable model available locally means you never lose your AI-assisted workflow entirely.
+
+**Privacy-sensitive prototyping**: When working with real customer data during development. Prototype with local models, then switch to hosted APIs with synthetic data for production.
+
+## Integration with Dev Tools
+
+Local models slot into the development workflow more easily than you'd expect.
+
+### Cursor / Continue
+
+Both support local models via Ollama. In Cursor, set the model to an Ollama endpoint for autocomplete. I use a local model for tab completions (where latency matters most) and API models for complex chat interactions.
+
+### Git Hooks
+
+```bash
+#!/bin/bash
+# .git/hooks/prepare-commit-msg
+# Generate commit message with local model
+
+DIFF=$(git diff --cached)
+
+if [ -z "$DIFF" ]; then
+    exit 0
+fi
+
+MSG=$(echo "$DIFF" | ollama run llama3.1:8b "Write a concise commit message for this diff. One line, imperative mood, max 72 chars. Output only the message, nothing else.")
+
+echo "$MSG" > "$1"
+```
+
+### Shell Aliases
+
+```bash
+# ~/.zshrc
+alias ai="ollama run llama3.1:8b"
+alias aicode="ollama run deepseek-coder-v2:16b"
+alias explain="ollama run llama3.1:8b 'Explain this simply:'"
+```
+
+## Cost Comparison Over Time
+
+Let's get concrete. Here's the cost of running local versus API for a solo developer over 12 months.
+
+**Assumptions**: 500 requests/day, average 1000 tokens in + 500 tokens out per request.
+
+| | Local (M4 Mac Mini) | API (GPT-4o-mini) | API (GPT-4o) |
+|---|---|---|---|
+| Hardware | $900 one-time | $0 | $0 |
+| Monthly API cost | $0 | ~$27/mo | ~$270/mo |
+| Electricity | ~$5/mo | $0 | $0 |
+| 12-month total | ~$960 | ~$324 | ~$3,240 |
+
+For GPT-4o-mini, the API is actually cheaper at this volume. For GPT-4o, local (with a 70B model that approximates quality) pays for itself in four months.
+
+The real advantage isn't cost — it's the unlimited experimentation. When inference is free, you iterate differently. You try ten variations of a prompt instead of three. You process your entire codebase through a model without thinking about the bill.
+
+<Warning>
+Don't run local models in production to save money unless you're prepared for the operational burden — monitoring, scaling, failover, updates. For most teams, the API cost is cheaper than the engineering time to operate local inference infrastructure.
+</Warning>
+
+## When to Use Local vs API
+
+| Situation | Use Local | Use API |
+|---|---|---|
+| Privacy-sensitive data | Yes | No |
+| High-volume batch processing | Yes | Maybe |
+| Interactive chat (quality matters) | No | Yes |
+| Complex reasoning tasks | No | Yes |
+| Offline / air-gapped | Yes | No |
+| Quick prototyping | Either | Either |
+| Production features | No (usually) | Yes |
+| Cost-sensitive at scale | Yes | No |
+| Need frontier intelligence | No | Yes |
+
+The best setup is both. Use local for development, prototyping, and privacy-sensitive work. Use APIs for production features where quality and reliability matter. The OpenAI-compatible API means switching is a one-line change.

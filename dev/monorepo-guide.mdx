@@ -1,0 +1,407 @@
+---
+title: "Monorepos: The Honest Guide"
+description: "When monorepos make sense, when they don't, and how to set one up without drowning in tooling."
+---
+
+# Monorepos: The Honest Guide
+
+The monorepo discourse is exhausting. One camp treats monorepos as the solution to all software engineering problems. The other camp treats them as an anti-pattern that only Google can pull off. The truth is boring: monorepos are a tool with trade-offs, and the right choice depends on your team, your codebase, and your CI infrastructure.
+
+I've used both approaches extensively. I've converted polyrepo setups to monorepos and I've split monorepos back into separate repos. Here's the honest assessment.
+
+## Monorepo vs Polyrepo: The Real Trade-offs
+
+Let me skip the theoretical arguments and focus on what I've actually experienced.
+
+### Where monorepos win
+
+**Atomic cross-package changes.** When you need to update a shared library and all its consumers in a single PR, monorepos make this trivial. In a polyrepo setup, you update the library, publish a new version, then open PRs in every consuming repo to bump the dependency. In a monorepo, it's one PR.
+
+```bash
+# Monorepo: one PR changes everything
+# packages/ui/src/Button.tsx  — change API
+# apps/web/src/pages/Home.tsx — update usage
+# apps/admin/src/pages/Dashboard.tsx — update usage
+# All reviewed, tested, and deployed together
+```
+
+**Code sharing without publishing.** You can import from a shared package using workspace references without publishing to npm. The code is always in sync because it's always at HEAD.
+
+**Consistent tooling.** One ESLint config, one TypeScript config, one test runner, one CI pipeline. When you upgrade a tool, it upgrades everywhere at once.
+
+**Discoverability.** "Where's the API client code?" is answered by looking in the monorepo, not by searching across 15 repos.
+
+### Where monorepos lose
+
+**CI complexity.** Running the full test suite on every PR doesn't scale. You need affected-build detection, and that tooling is non-trivial. At 50+ packages, CI time becomes a real problem without significant investment.
+
+**Git performance.** Large monorepos make `git status`, `git log`, and `git clone` slow. Git was designed for single-project repositories. Workarounds exist (sparse checkout, shallow clones) but they add operational complexity.
+
+**Ownership boundaries blur.** In a polyrepo, ownership is clear — if you own the repo, you own the code. In a monorepo, a PR might touch packages owned by three different teams. CODEOWNERS helps but doesn't fully solve the problem.
+
+**Deployment coupling risk.** It's easy to accidentally couple deployments. "Oh, the web app and the admin panel are in the same repo, so we deploy them together." That's not a monorepo problem — it's a discipline problem — but monorepos make it easy to fall into.
+
+**Onboarding noise.** New engineers see the entire codebase instead of just their team's code. This can be overwhelming and slows initial productivity.
+
+### The honest decision framework
+
+| Factor | Favors Monorepo | Favors Polyrepo |
+|--------|-----------------|-----------------|
+| Team size | < 50 engineers | > 200 engineers |
+| Shared code | Significant cross-project sharing | Minimal sharing |
+| Deploy cadence | Same cadence across projects | Different cadences |
+| Team autonomy | Teams collaborate tightly | Teams operate independently |
+| CI budget | Can invest in optimization | Limited CI resources |
+| Language diversity | Same language across projects | Multiple languages |
+
+<Info>
+The sweet spot for monorepos is 2-15 closely related packages maintained by 3-50 engineers who frequently need to make changes across package boundaries. If your packages rarely change together, a monorepo adds complexity without payoff.
+</Info>
+
+## Turborepo vs Nx vs Lerna: An Honest Comparison
+
+I've used all three in production. Here's my take as of 2026.
+
+### Turborepo
+
+**Best for:** Teams that want minimal config and are primarily doing build/test orchestration.
+
+Turborepo is focused and opinionated. It does one thing — task orchestration with caching — and does it well. The learning curve is shallow. The config is a single `turbo.json` file.
+
+```json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**"]
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "lint": {},
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}
+```
+
+**Pros:** Simple config, fast remote caching, good Vercel integration, low learning curve.
+**Cons:** Less flexibility for complex task graphs, fewer built-in generators, limited affected-build analysis.
+
+### Nx
+
+**Best for:** Large teams that need advanced features — affected builds, dependency graphs, custom generators, and module boundaries.
+
+Nx is a full-featured build system. It can do everything Turborepo does plus much more. The trade-off is complexity — the learning curve is steeper and the config surface area is larger.
+
+```json
+{
+  "targetDefaults": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"],
+      "cache": true
+    },
+    "test": {
+      "inputs": ["default", "^production", "{workspaceRoot}/jest.preset.js"],
+      "cache": true
+    }
+  },
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default", "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)"]
+  }
+}
+```
+
+**Pros:** Affected commands (`nx affected:test`), module boundary enforcement, custom generators, excellent dependency visualization.
+**Cons:** Steeper learning curve, heavier tooling footprint, Nx-specific concepts to learn.
+
+### Lerna (with Nx)
+
+Lerna was effectively abandoned, then revived by Nrwl (the Nx team). Modern Lerna uses Nx under the hood for task orchestration. I wouldn't choose Lerna for a new project in 2026 — go with Turborepo or Nx directly.
+
+### My recommendation
+
+- **Starting a new monorepo with < 10 packages?** Turborepo. You'll be productive in an afternoon.
+- **Large existing codebase with 10+ packages and multiple teams?** Nx. The advanced features justify the learning curve.
+- **Mostly npm workspace management without complex build orchestration?** Plain npm/pnpm workspaces might be enough. Not everything needs a build system.
+
+## Workspace Strategies
+
+The workspace structure matters more than the tooling. Here are the patterns I've seen work.
+
+### The standard layout
+
+```
+monorepo/
+├── apps/
+│   ├── web/           # Main web application
+│   ├── admin/         # Admin dashboard
+│   └── docs/          # Documentation site
+├── packages/
+│   ├── ui/            # Shared component library
+│   ├── utils/         # Shared utilities
+│   ├── config/        # Shared ESLint, TypeScript, Tailwind configs
+│   └── api-client/    # Generated API client
+├── tooling/
+│   ├── eslint/        # Shared ESLint configuration
+│   └── typescript/    # Shared TSConfig
+├── turbo.json
+├── package.json
+└── pnpm-workspace.yaml
+```
+
+### The `pnpm-workspace.yaml`
+
+```yaml
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'tooling/*'
+```
+
+### Package naming convention
+
+Use a consistent scope for all packages:
+
+```json
+{
+  "name": "@company/ui",
+  "name": "@company/utils",
+  "name": "@company/api-client",
+  "name": "@company/eslint-config"
+}
+```
+
+Internal packages reference each other via workspace protocol:
+
+```json
+{
+  "dependencies": {
+    "@company/ui": "workspace:*",
+    "@company/utils": "workspace:*"
+  }
+}
+```
+
+<Tip>
+Use `pnpm` for monorepos. Its workspace support is superior to npm and yarn. The strict dependency resolution prevents phantom dependencies (using a package that isn't in your direct dependencies), which is a common source of bugs in monorepos.
+</Tip>
+
+## Dependency Management
+
+Dependency management is where monorepos get tricky. The two approaches:
+
+### Single version policy
+
+Every package uses the same version of every dependency. React 18.3.0 everywhere. TypeScript 5.5 everywhere. No exceptions.
+
+```json
+// Root package.json — shared versions
+{
+  "pnpm": {
+    "overrides": {
+      "react": "18.3.0",
+      "react-dom": "18.3.0",
+      "typescript": "5.5.0"
+    }
+  }
+}
+```
+
+**Pros:** No version conflicts, consistent behavior, smaller `node_modules`.
+**Cons:** Upgrading one package forces upgrading all packages. If one app can't support React 19 yet, nobody gets React 19.
+
+### Independent version policy
+
+Each package manages its own dependency versions.
+
+**Pros:** Teams can upgrade independently, no forced coupling.
+**Cons:** Version conflicts, "works in my package" bugs, larger `node_modules`, multiple versions of React in the bundle.
+
+**My recommendation:** Single version policy for core dependencies (React, TypeScript, testing framework) and independent versions for everything else. The core deps need to be consistent across the monorepo; package-specific deps (a charting library used by one app) can vary.
+
+## CI Optimization: Affected Builds
+
+Running all tests on every PR doesn't scale past ~10 packages. You need affected-build detection — only test what changed.
+
+### Turborepo approach
+
+Turborepo's caching handles this automatically. If a package hasn't changed, its cached build output is reused.
+
+```bash
+# Only builds packages that changed or whose dependencies changed
+turbo run build --filter=...[HEAD~1]
+```
+
+### Nx approach
+
+Nx has first-class affected commands:
+
+```bash
+# Only test packages affected by changes on the current branch
+nx affected --target=test --base=main --head=HEAD
+```
+
+### GitHub Actions with path filters
+
+For simpler setups, GitHub Actions path filters work:
+
+```yaml
+name: Test Web App
+on:
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - 'packages/utils/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @company/web test
+```
+
+## Code Sharing Without Coupling
+
+The biggest trap in monorepos is that proximity encourages coupling. Just because you *can* import from any package doesn't mean you *should*.
+
+### Rules for healthy sharing
+
+1. **Shared packages have clear, stable APIs.** If you're importing an internal utility from another app (not a shared package), something is wrong.
+2. **Dependencies flow in one direction.** Apps depend on packages. Packages depend on other packages. Nothing depends on apps.
+3. **Enforce boundaries.** Use ESLint rules or Nx module boundaries to prevent unauthorized imports.
+
+```json
+// Nx module boundary rules
+{
+  "@nx/enforce-module-boundaries": [
+    "error",
+    {
+      "depConstraints": [
+        { "sourceTag": "scope:app", "onlyDependOnLibsWithTags": ["scope:shared"] },
+        { "sourceTag": "scope:shared", "onlyDependOnLibsWithTags": ["scope:shared"] }
+      ]
+    }
+  ]
+}
+```
+
+```
+✅ apps/web → packages/ui (app depends on shared package)
+✅ packages/ui → packages/utils (shared depends on shared)
+❌ apps/web → apps/admin (app depends on app)
+❌ packages/ui → apps/web (shared depends on app)
+```
+
+<Warning>
+If you find yourself frequently needing to import code from one app into another app, that code should be extracted into a shared package. Apps importing from other apps is the monorepo equivalent of a circular dependency.
+</Warning>
+
+## The Monorepo Tax
+
+Let me be honest about the ongoing cost of maintaining a monorepo:
+
+**Tooling maintenance.** Turborepo, Nx, pnpm — these tools update frequently. Someone needs to keep them current. Expect to spend 2-4 hours per month on tooling updates.
+
+**CI infrastructure.** Cache storage, parallel runners, affected-build detection — this infrastructure needs care. Expect CI costs 2-3x higher than a simple single-repo setup.
+
+**Onboarding complexity.** "Clone the repo, run `pnpm install`, then `turbo dev`" sounds simple until the monorepo has 30 packages and install takes 5 minutes and the dev server consumes 4GB of RAM.
+
+**Merge conflicts.** In active monorepos, the root `pnpm-lock.yaml` file is a constant merge conflict. Lock file conflicts are annoying but solvable with `pnpm install` after merge.
+
+This tax is worth paying when the benefits (atomic changes, code sharing, consistent tooling) outweigh the costs. For two apps with minimal shared code, it's not worth it. For eight apps with a shared component library, API client, and config, it absolutely is.
+
+## When to Split
+
+Sometimes the right move is to split packages out of a monorepo:
+
+- **A package has fundamentally different deployment requirements** (e.g., a serverless function that deploys to a different cloud provider)
+- **A package is consumed by external teams** and needs its own release cycle
+- **A package has grown into its own product** with its own team, roadmap, and on-call
+- **CI time is unmanageable** even with affected-build detection
+
+Splitting is fine. It's not a failure — it's an acknowledgment that the package has outgrown the monorepo's benefits. Make sure the split is clean: publish the package to your internal registry, update imports, and remove the code from the monorepo.
+
+## Practical Setup Walkthrough
+
+Here's how I set up a new monorepo from scratch:
+
+```bash
+# Initialize
+mkdir my-monorepo && cd my-monorepo
+pnpm init
+git init
+
+# Configure workspaces
+cat > pnpm-workspace.yaml << 'EOF'
+packages:
+  - 'apps/*'
+  - 'packages/*'
+EOF
+
+# Create shared TypeScript config
+mkdir -p packages/typescript-config
+cat > packages/typescript-config/package.json << 'EOF'
+{ "name": "@company/typescript-config", "version": "0.0.0", "private": true }
+EOF
+
+cat > packages/typescript-config/base.json << 'EOF'
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx"
+  }
+}
+EOF
+
+# Install Turborepo
+pnpm add -Dw turbo
+
+# Create turbo config
+cat > turbo.json << 'EOF'
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": { "dependsOn": ["^build"], "outputs": ["dist/**", ".next/**"] },
+    "dev": { "cache": false, "persistent": true },
+    "lint": { "dependsOn": ["^build"] },
+    "test": {}
+  }
+}
+EOF
+```
+
+Add scripts to the root `package.json`:
+
+```json
+{
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean && rm -rf node_modules"
+  }
+}
+```
+
+From here, create apps and packages as needed. Each gets its own `package.json`, `tsconfig.json` (extending the shared base), and entry point. The monorepo tooling handles the rest.
+
+The setup takes about an hour. The ongoing maintenance is where the real investment lies. Choose wisely.

@@ -1,0 +1,169 @@
+---
+title: "Bookshelf · Thinking, Fast and Slow"
+description: "Kahneman's framework for understanding cognitive biases — and how I use it to make better engineering and life decisions."
+---
+
+# Thinking, Fast and Slow · Daniel Kahneman
+
+> _"Nothing in life is as important as you think it is, while you are thinking about it."_
+
+## Why I Picked This Up
+
+I used to believe I was a rational decision-maker. Engineers love that narrative — we deal in logic, data, systems. We make trade-offs based on evidence. Except we don't. Not really. We anchor on the first architecture we sketch. We over-index on the last outage. We confuse confidence with competence in hiring panels.
+
+Kahneman's book dismantled my illusion of rationality, and I'm grateful for it. This isn't a self-help book — it's a user manual for the human brain, written by the psychologist who won the Nobel Prize in Economics for proving we're all predictably irrational.
+
+I've read it twice now. The first time changed how I think about thinking. The second time changed how I lead.
+
+## The Two Systems
+
+The book's central framework is deceptively simple:
+
+| | System 1 | System 2 |
+|---|---|---|
+| **Speed** | Fast, automatic | Slow, deliberate |
+| **Effort** | Effortless | Requires concentration |
+| **Mode** | Intuitive, associative | Analytical, logical |
+| **Errors** | Systematic biases | Lazy — avoids hard work |
+| **Example** | "This code looks wrong" (gut feeling) | "Let me trace through the logic step by step" |
+
+System 1 is the snap judgment. System 2 is the careful analysis. The insight that changed everything for me: **System 1 is always on, and System 2 is lazy.** We think we're operating in System 2 most of the time. We're not. We're running on heuristics, shortcuts, and vibes — and backfilling rational explanations after the fact.
+
+### How This Shows Up in Engineering
+
+When I review a pull request and something "feels off," that's System 1 pattern-matching against thousands of prior code reviews. It's often right. But when I reject an approach because "it doesn't feel clean," that's System 1 substituting aesthetic preference for engineering judgment. Knowing the difference is the skill.
+
+**My practice:** When I have a strong gut reaction to a technical decision — positive or negative — I pause and ask: "Is this System 1 giving me a valid signal, or is this a bias I should override?" I don't always get it right, but the question itself is a forcing function for better thinking.
+
+## The Biases That Haunt Engineering
+
+### Anchoring Bias in Estimation
+
+> _"People who are asked whether Gandhi was more than 114 years old when he died give much higher estimates of his age at death than do people who are asked whether Gandhi was more or less than 35."_
+
+This is the single most damaging bias in software engineering. The first number thrown out in a sprint planning session becomes the anchor. If someone says "this feels like a 2-week project," every subsequent estimate orbits that number.
+
+**How it shows up:**
+- The first architecture sketch becomes the assumed baseline, even if it was drawn in 5 minutes on a whiteboard
+- The original timeline in a project proposal anchors all future negotiations, even when scope has tripled
+- The "story points" someone mentions first in planning poker dominates the final estimate
+
+**My countermeasure:** I use silent estimation — everyone writes their estimate independently before anyone speaks. When I'm the lead, I speak last. I've also started framing estimation as ranges: "What's the fastest this could ship if everything goes right? What's the slowest if we hit every snag?" The range forces acknowledgment of uncertainty that a single number hides.
+
+### The Availability Heuristic in Incident Response
+
+We judge probability by how easily examples come to mind. After a high-profile database outage, suddenly every performance ticket gets treated as a potential database crisis — even when the symptoms point elsewhere.
+
+**How it shows up:**
+- The last major incident dominates post-mortem thinking, even when the current issue has different root causes
+- Teams over-invest in preventing the _last_ failure instead of the _next_ one
+- Hiring panels anchor on their worst hire and start seeing red flags everywhere
+
+**My countermeasure:** During incident response, I explicitly ask: "What are we assuming because of the last incident? What would we think if that incident had never happened?" It's uncomfortable, but it surfaces blind spots.
+
+### Loss Aversion in Tech Decisions
+
+> _"Losses loom larger than gains."_
+
+Kahneman showed that losing $100 feels roughly twice as painful as gaining $100 feels good. This asymmetry is everywhere in engineering leadership.
+
+**How it shows up:**
+- Teams refuse to deprecate legacy systems because the pain of migration feels larger than the gain of a better system
+- Engineers hold onto sunk-cost projects because killing them "wastes" the work already done
+- Leaders avoid making reversible decisions because they're afraid of being wrong, even when inaction is the riskier choice
+- Developers resist framework migrations even when the current framework is clearly dying
+
+**My countermeasure:** I ask: "If we were starting from scratch today, would we build it this way?" If the answer is no, the only question is timing and sequencing — not whether to change. I also reframe losses as investments: "We're not throwing away 6 months of work. We learned what doesn't work, and that knowledge is worth 6 months."
+
+### The Planning Fallacy — Every Engineer's Enemy
+
+> _"The prevalent tendency to underweight or ignore distributional information is perhaps the major source of error in forecasting."_
+
+The planning fallacy is the systematic tendency to underestimate the time, cost, and risk of future actions while overestimating their benefits. Sound familiar? It's every sprint planning session I've ever attended.
+
+**How it shows up:**
+- "This should take two days" (it takes two weeks)
+- "We just need to swap out the database layer" (it touches 47 services)
+- "The migration will be seamless" (it never is)
+
+Kahneman's explanation: we plan based on the best-case scenario and ignore base rates — the historical data about how long similar projects actually took.
+
+**My countermeasure:** Reference class forecasting. Instead of asking "How long will this take?" I ask "How long did similar projects take historically?" I keep a log of estimates vs actuals for my team. After a year, the data was humbling: we were systematically 40-60% over-optimistic. Now I apply a 1.5x multiplier to every initial estimate, and we're much closer to reality.
+
+<Tip>
+Keep an estimation log. Track your estimates vs actual completion times for 6 months. The patterns will be uncomfortable and invaluable.
+</Tip>
+
+### Overconfidence in Architecture
+
+> _"We are prone to overestimate how much we understand about the world and to underestimate the role of chance in events."_
+
+The more experienced an engineer gets, the more confident they become in their architectural intuitions. That confidence is often justified — but it's also the setup for the most expensive mistakes.
+
+**How it shows up:**
+- Senior engineers who design systems based on pattern-matching from past experience, without validating assumptions for the current context
+- Architects who can't articulate the failure modes of their own designs because they've never seriously considered them
+- The "I've done this before" trap — just because a pattern worked at your last company doesn't mean it works at this one
+
+**My countermeasure:** For every architecture decision, I write a "pre-mortem" document listing the top 5 ways this design could fail. I stole this from Kahneman's suggestion directly. It's uncomfortable to argue against your own design, but it catches things that peer review often misses because reviewers defer to the architect's confidence.
+
+## Applying Kahneman to Code Reviews
+
+Code review is a cognitive minefield. Here's my framework for catching my own biases:
+
+| Bias | How It Shows Up | My Fix |
+|---|---|---|
+| Anchoring | First impression of the PR sets the tone | Read the description last; look at the diff first |
+| Halo effect | Good engineers get easier reviews | Review code, not the author — I try to forget who wrote it |
+| Confirmation bias | Looking for evidence that confirms my initial reaction | Explicitly look for one thing that contradicts my gut |
+| WYSIATI (What You See Is All There Is) | Reviewing only what's in the diff, ignoring what's missing | Ask "What's NOT in this PR that should be?" |
+| Availability | Over-flagging patterns from recent bugs | Check if the "issue" I'm seeing actually applies here |
+
+<Info>
+WYSIATI — "What You See Is All There Is" — might be Kahneman's most important concept for engineers. We make judgments based only on available information without considering what information is missing. In code reviews, this means the biggest risks are in the code that _wasn't_ written, not the code that was.
+</Info>
+
+## Applying Kahneman to Hiring
+
+Kahneman's research on expert judgment transformed how I approach hiring panels.
+
+**Before:** I'd conduct unstructured interviews, form a "gut feeling," and advocate for it in the debrief.
+
+**After:** I use structured interviews with pre-defined criteria scored independently. Each interviewer evaluates against specific competencies before seeing anyone else's feedback. The debrief starts with individual scores, not narratives.
+
+This isn't cold or robotic — it's fairer. Unstructured interviews are essentially System 1 exercises in pattern-matching, which means they're riddled with bias. Structured interviews engage System 2, which leads to better signal and, critically, more equitable outcomes.
+
+## The Two Selves
+
+One of the book's most profound insights isn't about bias at all — it's about happiness. Kahneman distinguishes between the **experiencing self** (how you feel moment to moment) and the **remembering self** (how you evaluate your experiences in retrospect).
+
+The remembering self dominates our decision-making. We choose vacations, jobs, and projects based on how we think we'll remember them, not based on how we'll experience them in the moment.
+
+**How I apply this:** When evaluating a project or a career move, I ask both questions:
+- "Will I enjoy the day-to-day of this?" (experiencing self)
+- "Will this make a good story / accomplishment in retrospect?" (remembering self)
+
+The best choices satisfy both. But when they conflict, I've learned to weight the experiencing self more heavily. A prestigious project that makes you miserable every day isn't worth the story.
+
+## What Changed After Reading This
+
+1. **I became comfortable with uncertainty.** Not every decision needs a confident answer. "I'm 60% sure" is a valid and honest position.
+2. **I started tracking my predictions.** Calibration — the art of knowing how much you know — only improves with feedback. I keep a [decision journal](/thinkish/decision-journal) where I log predictions and review them quarterly.
+3. **I got better at separating signal from noise.** Not every datapoint is meaningful. Not every incident is a pattern. System 2 asks "What's the base rate?" before reacting.
+4. **I became a more empathetic leader.** Understanding that everyone — including me — is running on heuristics and biases makes me more patient with other people's "irrational" behavior. They're not irrational. They're human.
+
+## Key Quotes I Revisit
+
+- _"A reliable way to make people believe in falsehoods is frequent repetition, because familiarity is not easily distinguished from truth."_
+- _"The confidence that individuals have in their beliefs depends mostly on the quality of the story they can tell about what they see, even if they see little."_
+- _"We can be blind to the obvious, and we are also blind to our blindness."_
+
+## Who Should Read This
+
+Every engineer who estimates timelines. Every leader who conducts interviews. Every human who makes decisions — which is every human. It's dense, it's long, and it's worth every page.
+
+Read it alongside a notebook. The ideas are too important to just wash over you.
+
+<Note>
+Pairs well with: [Mental Models for Engineering Leaders](/thinkish/mental-models-engineering) for practical application, [The Decision Journal](/thinkish/decision-journal) for building calibration, and [The Pragmatic Programmer](/books/pragmatic-programmer) for the engineering-specific lens.
+</Note>

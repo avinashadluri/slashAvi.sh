@@ -1,0 +1,238 @@
+---
+title: "Mental Models for Engineering Leaders"
+description: "The thinking tools I use for technical decisions — leverage, reversibility, blast radius, and the map is not the territory."
+---
+
+# Mental Models for Engineering Leaders
+
+> _"All models are wrong, but some are useful."_ — George Box
+
+These aren't abstract concepts from a business school textbook. They're the mental tools I reach for when making technical decisions — the ones that have prevented expensive mistakes, surfaced hidden risks, and helped me communicate complex trade-offs to both engineers and executives.
+
+I've organized them from the ones I use most frequently to the ones I reach for in specific situations. Each one includes a real engineering application, because a mental model you can't apply is just trivia.
+
+---
+
+## Reversible vs Irreversible Decisions (One-Way and Two-Way Doors)
+
+This is the model I use most frequently, and it comes from Jeff Bezos's framing: some decisions are "one-way doors" (irreversible or very costly to reverse) and some are "two-way doors" (easily reversible, low cost to undo).
+
+**The principle:** Apply heavy process and deliberation to one-way door decisions. Make two-way door decisions quickly and move on. The biggest organizational dysfunction I see is applying one-way door rigor to two-way door decisions — which creates paralysis — and applying two-way door speed to one-way door decisions — which creates catastrophe.
+
+| | Two-Way Door | One-Way Door |
+|---|---|---|
+| **Reversibility** | Easy to undo | Costly or impossible to undo |
+| **Process** | Decide fast, iterate | Deliberate, write it down, seek input |
+| **Ownership** | Individual or small team | Broader consensus |
+| **Example** | Feature flag rollout, internal tool choice | Database schema for a public API, data deletion policy |
+| **Error cost** | Low — just revert | High — migration, downtime, trust loss |
+
+**How I apply this:**
+
+Before any significant technical decision, I ask: "Is this a one-way door or a two-way door?" If it's two-way, I push for a decision within the meeting. If it's one-way, I push for an RFC and a review period.
+
+The mistake I see most often: treating everything as a one-way door. Teams spend weeks debating a library choice that could be swapped out in a day. They form a committee to decide on a logging format. They write a 10-page RFC for a feature flag experiment. This isn't rigor — it's fear of being wrong, dressed up as process.
+
+**The subtlety:** Some decisions look two-way but are secretly one-way. Choosing a database is "technically" reversible — you can always migrate. But the cost of migrating a production database with years of data, dozens of dependent services, and accumulated tribal knowledge is so high that it's effectively irreversible. Look at actual switching cost, not theoretical reversibility.
+
+<Tip>
+When someone says "we can always change it later," ask: "What would it actually cost to change it in 12 months?" If the honest answer is "a quarter of engineering time," it's a one-way door in two-way door clothing.
+</Tip>
+
+---
+
+## Leverage
+
+> _"Give me a lever long enough and a fulcrum on which to place it, and I shall move the world."_ — Archimedes
+
+Leverage in engineering leadership means identifying where a small amount of effort produces a disproportionately large outcome. Not all work is equal. An hour spent on the right thing can be worth more than a week spent on the wrong thing.
+
+**High-leverage activities for engineering leaders:**
+
+| Activity | Why It's High Leverage |
+|---|---|
+| Writing a clear RFC | Aligns 15 engineers for 3 months; prevents divergent effort |
+| Building a reusable template | Used 100+ times; saves hours per use |
+| Unblocking a teammate in 15 minutes | Prevents days of stuck time; compounds through morale |
+| Setting a coding standard | Prevents 1000 future code review debates |
+| Improving CI pipeline speed | Saves minutes per build × hundreds of builds per week |
+| Writing an architecture decision record | Prevents re-litigating the same decision every 6 months |
+
+**How I apply this:**
+
+Every Monday morning, before looking at my task list, I ask: "What's the highest-leverage thing I could do this week?" Often, it's not what's at the top of my Jira board. It might be a 30-minute conversation that unblocks a stalled cross-team initiative. It might be writing a one-page document that resolves a recurring debate. It might be mentoring a mid-level engineer through a decision that will accelerate their growth for years.
+
+The discipline is choosing leverage over urgency. Urgent-but-low-leverage work fills your day and makes you feel busy. High-leverage work often doesn't feel urgent — it feels optional. But it's the work that compounds.
+
+**The anti-pattern:** Using "leverage" to justify only working on strategic, high-level things while ignoring execution. Leverage isn't an excuse to avoid hands-on work. Sometimes the highest-leverage thing is writing the code yourself because you can do it in 2 hours and teaching someone else would take a week. Context determines where the leverage is.
+
+---
+
+## Blast Radius Thinking
+
+Every change, decision, or failure has a blast radius — the scope of systems, users, and processes it affects. Blast radius thinking means explicitly considering and minimizing the scope of impact before acting.
+
+**How I apply this:**
+
+Before any deployment, migration, or architectural change, I ask three questions:
+
+1. **If this goes wrong, what breaks?** List the systems, services, and user-facing features that are affected.
+2. **How many users are in the blast radius?** A bug in an internal admin tool has a different blast radius than a bug in the checkout flow.
+3. **Can I shrink the blast radius?** Feature flags, canary deployments, gradual rollouts, A/B tests — these are all blast radius reduction techniques.
+
+**Real example:** We were migrating an authentication service. The naive approach was a big-bang migration: flip the switch, everyone moves at once. The blast radius: every authenticated user on every platform.
+
+Instead, we migrated by cohort. Internal users first (small blast radius, high tolerance for issues). Then a 5% canary of external users. Then 25%, 50%, 100%. Each stage gave us confidence and reduced the blast radius of any bugs to a manageable scope.
+
+The migration took 3 weeks longer than a big-bang approach. It also didn't cause a single user-facing incident. The trade-off was worth it — not because we're risk-averse, but because we matched the deployment strategy to the blast radius.
+
+| Blast Radius | Strategy | Example |
+|---|---|---|
+| Low (internal tools, small user base) | Ship fast, fix in production | Updating an internal dashboard |
+| Medium (subset of users, non-critical path) | Canary deploy, feature flag | New recommendation algorithm |
+| High (all users, critical path) | Gradual rollout, extensive testing, rollback plan | Payment processing change |
+| Catastrophic (data loss, security breach) | Formal review, staged migration, dry runs | Database migration, auth changes |
+
+<Info>
+Blast radius thinking isn't about avoiding risk. It's about right-sizing your caution to the actual stakes. Under-caution with a large blast radius is reckless. Over-caution with a small blast radius is wasteful. The skill is matching the two.
+</Info>
+
+---
+
+## The Map Is Not the Territory
+
+> _"The map appears to us more real than the land."_ — D.H. Lawrence
+
+Every abstraction — architecture diagrams, system models, process documentation, mental models themselves — is a simplification of reality. The map is useful, but it is not the territory. When the map and the territory disagree, the territory is right.
+
+**How this shows up in engineering:**
+
+- **Architecture diagrams** show how we think the system works. Production traffic shows how it actually works. They're often different, especially in systems that have evolved organically over years. I've been burned by trusting the diagram during incident response and missing the actual dependency path.
+
+- **Monitoring dashboards** are maps. They show what we chose to measure. The absence of an alert doesn't mean the absence of a problem — it means the problem isn't in our map. The most dangerous production issues are the ones that don't trigger any dashboard because nobody thought to measure that dimension.
+
+- **Estimations** are maps. The sprint plan shows how we think the work will unfold. The actual work unfolds differently because reality has details the map omits — unexpected dependencies, ambiguous requirements, context switches, sick days.
+
+- **Process documentation** describes how work should flow. The actual flow includes workarounds, tribal knowledge, informal channels, and exceptions that nobody documented because they "just know."
+
+**How I apply this:**
+
+I regularly schedule "territory walks" — sessions where I trace actual behavior through the system instead of relying on the diagram. For software, this means reading production logs, tracing actual request paths, and auditing what code actually runs (not what we think runs). For processes, this means shadowing someone doing the actual work instead of reading the process doc.
+
+The model applies to people too. The mental model I have of a teammate's skills, preferences, and motivations is a map. The actual person is the territory. When they behave "unexpectedly," the map is wrong — not the person.
+
+---
+
+## Chesterton's Fence
+
+> _"Before you remove a fence, understand why it was put there in the first place."_
+
+G.K. Chesterton's principle: if you encounter something that seems pointless or irrational — a process, a piece of code, a policy — don't remove it until you understand why it exists. The person who put it there probably had a reason. If you can't figure out the reason, you don't understand the system well enough to safely change it.
+
+**How this shows up in engineering:**
+
+Every codebase has code that looks wrong. Functions with inexplicable logic. Config values that seem arbitrary. Error handling that appears excessive. The junior engineer's instinct is to "clean it up." The pragmatic engineer's instinct is to ask "why is this here?"
+
+**Real example:** A new engineer on my team found a `sleep(500ms)` call in a critical data processing pipeline and flagged it as a performance bug. It looked absurd — why would anyone intentionally add a half-second delay? The answer, discovered after investigation: a third-party API we depended on had an undocumented rate limit. The sleep was preventing cascading failures from rate limit rejections. Removing it would have caused an outage during peak traffic.
+
+The sleep was a Chesterton's fence. It looked irrational. It was actually load-bearing.
+
+**My rule:** Before removing or changing any code I didn't write, I check git blame and read the commit message. If the commit message doesn't explain the "why," I find the author and ask. If the author is gone, I'm extra cautious. Code without documented rationale is the engineering equivalent of an unmarked fence — assume it's structural until proven otherwise.
+
+---
+
+## Hanlon's Razor in Debugging
+
+> _"Never attribute to malice that which is adequately explained by stupidity."_
+
+In the engineering context, I expand this: **Never attribute to malice that which is adequately explained by misunderstanding, miscommunication, incomplete information, or a reasonable person making a different trade-off than you would.**
+
+**How this applies to debugging (systems):**
+
+When a system fails, the first instinct is often to blame the most recent change. "Who deployed what?" becomes a witch hunt. Hanlon's razor reframes the question: "What did the system allow to happen, and why did a reasonable person think this was safe?"
+
+The answer is almost always a systemic issue, not an individual failure. The deploy was approved by CI. The code passed review. The monitoring didn't catch it. The person who deployed it was following the normal process. If a normal process can produce a catastrophic outcome, the process is the problem — not the person.
+
+**How this applies to debugging (people):**
+
+When a colleague makes a decision I disagree with — an architecture choice, a timeline commitment, a hiring decision — my default assumption is that they had context I don't, or weighed the trade-offs differently than I would. Not that they're incompetent or malicious.
+
+This assumption is correct roughly 95% of the time. The 5% where someone is genuinely acting in bad faith is best handled through formal processes, not through assuming the worst about everyone.
+
+**My practice during incident response:** I ban "who" questions during the first 30 minutes. Only "what" and "why" questions are allowed. "What changed?" not "Who changed it?" "Why did the system allow this?" not "Why did this person do this?" The language shift changes the dynamic from blame to understanding.
+
+<Tip>
+In post-mortems, replace "X caused the outage" with "the system was in a state where X could cause an outage." The first framing blames a person. The second frames identifies a systemic weakness. The second is always more useful.
+</Tip>
+
+---
+
+## Second-Order Effects
+
+First-order thinking asks: "What happens if I do this?" Second-order thinking asks: "And then what happens? And then what?"
+
+**How this applies to engineering decisions:**
+
+| Decision | First-Order Effect | Second-Order Effect | Third-Order Effect |
+|---|---|---|---|
+| Add mandatory code review approval | Better code quality | Slower PR merge times | Engineers batch changes into larger PRs → harder reviews → worse quality |
+| Implement microservices | Independent deployments | Distributed complexity | Teams need more infrastructure expertise → hiring pressure → higher costs |
+| Add more monitoring alerts | Better visibility | Alert fatigue | Team ignores alerts → miss real incidents |
+| Offer unlimited PTO | Employees feel trusted | No one takes PTO (no clear "norm") | Burnout increases |
+
+**How I apply this:**
+
+For any significant technical decision, I write out the first three orders of consequence. It takes 10 minutes and has prevented more bad decisions than any other practice.
+
+The pattern I watch for: second-order effects that directly counteract the intended first-order effect. "We added code review requirements to improve quality" → "but PRs are so slow now that people batch changes and quality actually decreased." This inversion pattern is shockingly common and almost always invisible if you only think one level deep.
+
+---
+
+## When to Optimize vs When to Satisfice
+
+Herbert Simon coined "satisficing" — choosing an option that's good enough rather than searching for the optimal one. The opposite is optimizing — exhaustively evaluating all options to find the best.
+
+**The rule:** Optimize for decisions that are irreversible, high-stakes, and infrequent. Satisfice for decisions that are reversible, low-stakes, and frequent.
+
+| Decision Type | Strategy | Why |
+|---|---|---|
+| Database choice for core product | Optimize | High switching cost, long-term commitment |
+| Which linter rules to enable | Satisfice | Low stakes, easy to change |
+| Hiring a staff engineer | Optimize | Huge impact, hard to reverse |
+| Choosing a meeting time | Satisfice | Low impact, easily rescheduled |
+| API contract design for public API | Optimize | External consumers, versioning is costly |
+| Internal tool UI design | Satisfice | Small audience, iterate based on feedback |
+
+**How I apply this:**
+
+I explicitly label decisions as "optimize" or "satisfice" in discussions. It prevents the pattern where the team spends 45 minutes debating a satisfice-level decision (like which npm package to use for date formatting) with optimize-level rigor.
+
+When I hear "but what if there's a better option?" for a low-stakes reversible decision, I say: "Probably. But the cost of finding it exceeds the value of having it. Let's pick this one, move on, and change it if it causes problems." This isn't laziness — it's the deliberate conservation of decision-making energy for the decisions that actually matter.
+
+---
+
+## Putting It Together
+
+No single mental model is sufficient. The power comes from combining them:
+
+**Scenario: The team wants to rewrite a core service.**
+
+1. **Reversibility check:** Is this a one-way door? Mostly yes — a rewrite is months of effort and affects every downstream consumer. Apply heavy deliberation.
+2. **Chesterton's fence:** Why was the current service built this way? What constraints existed that might still exist? Have we talked to the original authors?
+3. **Blast radius:** What's the scope of impact if the rewrite goes wrong? Can we stage the migration to limit blast radius?
+4. **Second-order effects:** If we rewrite, what else changes? Do other teams need to migrate? Does the new service need new expertise we don't have?
+5. **Leverage:** Is this the highest-leverage use of 3 months of engineering time? What else could we achieve with the same investment?
+6. **Map vs territory:** Is our understanding of the current system's problems based on diagrams and complaints, or on actual investigation of production behavior?
+7. **Optimize vs satisfice:** Is a full rewrite necessary, or would targeted improvements to the existing system satisfice?
+
+Running through this checklist takes 30 minutes. It has saved me months of misallocated engineering effort.
+
+## How I Internalized These Models
+
+I didn't memorize them from a list. I learned them the expensive way — by making decisions without them and paying the consequences. The decision journal ([see my process here](/thinkish/decision-journal)) was the tool that made the learning stick, because reviewing past decisions through the lens of these models showed me exactly where my thinking had gaps.
+
+The goal isn't to think about these models explicitly for every decision. The goal is to internalize them so deeply that they become reflexive — the way an experienced driver checks mirrors without consciously thinking about it. That internalization takes practice, repetition, and honest review.
+
+<Note>
+Pairs well with: [Thinking, Fast and Slow](/books/thinking-fast-slow) for understanding the biases these models counteract, [The Decision Journal](/thinkish/decision-journal) for the practice of applying these models systematically, [Thinking Frameworks](/thinkish/frameworks) for the broader cognitive toolkit, and [The Pragmatic Programmer](/books/pragmatic-programmer) for the engineering-specific applications.
+</Note>

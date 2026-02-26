@@ -1,0 +1,237 @@
+---
+title: "AI Pair Programming: Beyond Autocomplete"
+description: "How I actually use AI coding tools — Cursor, Claude, Copilot — and the workflow changes that 10x'd my output."
+---
+
+# AI Pair Programming: Beyond Autocomplete
+
+I've been programming professionally for over 15 years. In the last two years, AI tools have changed how I work more than any other technology shift I've lived through — more than Git, more than React, more than cloud infrastructure.
+
+But here's the thing: most developers are using AI coding tools at maybe 20% of their potential. They've got Copilot autocompleting variable names and occasionally generating a function. That's fine. But the real productivity gains come from fundamentally changing your development workflow, not just adding smarter autocomplete.
+
+Here's how I actually use these tools, what works, what doesn't, and what I've learned shipping products with AI assistance across PromptLib, MetaLabs, and my work at Weel.
+
+## The Evolution: Autocomplete → Chat → Agents
+
+Understanding where we are helps explain why most people are still stuck at stage one.
+
+**Stage 1: Autocomplete (2021-2022)** — Copilot launched and we got inline suggestions. Useful for boilerplate, test scaffolding, and finishing obvious patterns. A nice productivity bump, maybe 10-15%.
+
+**Stage 2: Chat (2023)** — ChatGPT, then Copilot Chat, then Claude in the sidebar. Now you could ask questions, get explanations, generate entire files. The productivity bump was bigger, but required learning new interaction patterns.
+
+**Stage 3: Agents (2024-now)** — Cursor Composer, Claude Code, Copilot Workspace. AI that can read your codebase, edit multiple files, run commands, and iterate on errors. This is where the 10x gains live — and where the risks are highest.
+
+Most developers I talk to are still in Stage 1. They use Copilot for autocomplete and ChatGPT for Googling. They haven't restructured their workflow around Stage 3 capabilities.
+
+## My Daily Toolset
+
+I use different tools for different tasks. There is no single "best" AI coding tool.
+
+### Cursor: My Primary IDE
+
+Cursor is where I spend 80% of my coding time. Here's specifically how I use it:
+
+**Tab completion** — The bread and butter. Cursor's autocomplete is context-aware across the project. It knows your imports, your types, your naming conventions. I accept completions for maybe 40% of the code I write.
+
+**Inline editing (Cmd+K)** — Select a block of code, describe what you want changed. This is the sweet spot for small refactors: "Convert this to use async/await", "Add error handling", "Make this function generic."
+
+```typescript
+// I select this block and type: "Add proper error handling and retry logic"
+async function fetchUserData(userId: string) {
+  const response = await fetch(`/api/users/${userId}`);
+  return response.json();
+}
+
+// Cursor transforms it into something like:
+async function fetchUserData(userId: string, retries = 3): Promise<User> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(`/api/users/${userId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (attempt === retries) throw error;
+      await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+    }
+  }
+  throw new Error("Unreachable");
+}
+```
+
+**Composer (Agent mode)** — For multi-file changes. "Add a new API endpoint for user preferences with validation, types, tests, and update the route file." Composer reads existing patterns in your codebase and replicates them. This is where I get the biggest time savings on feature work.
+
+**Chat with codebase context** — I `@`-mention files and ask questions: "How does the authentication middleware work in `@middleware/auth.ts`?" or "What would break if I changed the User type in `@types/user.ts`?"
+
+### Claude Code: The Power Tool
+
+Claude Code is a terminal-based agent that can navigate your entire codebase, make changes, and run commands. I use it for tasks that require deep understanding across many files.
+
+**Complex refactors**: "Migrate all API routes from Express to Hono, maintaining the existing middleware chain and error handling patterns." Claude Code will read your codebase, plan the migration, make changes across dozens of files, and run your test suite to verify.
+
+**Debugging**: "The test in `user.test.ts` is failing with this error [paste error]. Find the root cause and fix it." It will trace through the code, identify the issue, and fix it — often finding bugs I'd have spent an hour tracking down.
+
+**Architecture exploration**: "Explain the data flow from when a user clicks 'Submit Order' to when the order appears in the admin dashboard." It reads the relevant files and gives you a coherent explanation.
+
+<Tip>
+Claude Code shines when you give it the full context of what you're trying to achieve, not just the immediate task. "I'm building a notification system. Here's the design doc..." is much better than "Add a function to send emails."
+</Tip>
+
+### Copilot: The Reliable Workhorse
+
+I still use Copilot for a specific niche: boilerplate in languages or frameworks I use less frequently. Writing CloudFormation templates, Terraform configs, or SQL migrations — Copilot is fast and good enough. It doesn't need the project context that Cursor provides, because these files tend to be self-contained.
+
+## When AI Slows You Down
+
+This is the part most AI coding advocates skip. AI tools are not always faster. Here's when I turn them off or ignore their suggestions:
+
+**When you're in flow state**: If I know exactly what I'm writing, tab completions that suggest the wrong thing break my concentration. When I'm deep in complex logic, I sometimes disable autocomplete entirely.
+
+**When the context is wrong**: AI models predict based on patterns. If you're writing code that intentionally breaks a pattern — a special case, a workaround, a creative solution — the model will fight you every step.
+
+**When exploring unfamiliar territory**: If I'm learning a new library, I want to understand the API myself. Accepting AI-generated code for something I don't understand creates tech debt in my own knowledge.
+
+**When debugging subtle issues**: "Fix this bug" works for simple issues. For race conditions, memory leaks, or complex state management bugs, the AI often makes things worse because it doesn't understand the full system behavior at runtime.
+
+**When writing tests**: Counterintuitively, I write most test logic myself. AI-generated tests tend to test the implementation, not the behavior. They pass because they mirror the code, not because they verify requirements.
+
+## The AI-Native Development Loop
+
+Here's the workflow I've evolved to over the past year. It's different from both traditional development and naive AI usage.
+
+### 1. Design First (Human)
+
+I start every feature by writing a brief design document — even if it's just for myself. What's the user story? What are the edge cases? What does the data model look like? What existing code does this touch?
+
+This document becomes the context I feed to AI tools. Better design docs = better AI output. Every time.
+
+### 2. Scaffold with AI (Agent)
+
+Using Cursor's Composer or Claude Code, I generate the initial structure: types, interfaces, route handlers, component shells, database migrations. I describe the feature in detail, reference the design doc, and point to existing code patterns.
+
+```
+"Create a new feature for user preferences. Follow the patterns in @routes/settings.ts 
+and @components/SettingsPanel.tsx. The preferences should include notification settings 
+(email, push, in-app), theme (light/dark/system), and language. Use the existing 
+@lib/db.ts patterns for database access."
+```
+
+### 3. Review Like a Junior's PR (Human)
+
+This is the critical step most people skip. I review every line of AI-generated code as if a junior developer submitted it as a pull request.
+
+Things I look for:
+
+- **Does it match the codebase style?** Naming conventions, error handling patterns, import organization
+- **Are there unnecessary abstractions?** AI loves to over-engineer. If a simple function will do, remove the factory pattern.
+- **Edge cases?** AI covers the happy path well. Check null handling, empty arrays, concurrent access.
+- **Security?** SQL injection, XSS, auth bypass — AI doesn't think adversarially by default.
+- **Performance?** N+1 queries, unbounded loops, missing pagination.
+
+### 4. Implement the Hard Parts (Human + AI)
+
+The scaffolding is 60% of the code but 20% of the complexity. The remaining 40% — business logic, complex state management, performance-critical paths — I write mostly by hand, using AI as a sounding board.
+
+I'll ask: "Is there a race condition in this approach?" or "What's the time complexity of this algorithm?" or "How would you handle the case where the database write succeeds but the cache invalidation fails?"
+
+### 5. Test and Iterate (AI-Assisted)
+
+I write test descriptions and let AI generate the test implementations, then review and adjust. I use AI to generate edge case test data — it's very good at thinking of inputs I wouldn't consider.
+
+```python
+# I write:
+# Test: verify order total calculation with mixed currencies
+
+# AI generates:
+def test_order_total_mixed_currencies():
+    order = Order(items=[
+        Item(price=10.00, currency="USD"),
+        Item(price=8.50, currency="EUR"),
+        Item(price=1500, currency="JPY"),  # No decimal for yen
+    ])
+    with mock_exchange_rates({"EUR_USD": 1.08, "JPY_USD": 0.0067}):
+        total = order.calculate_total(target_currency="USD")
+        assert total == pytest.approx(29.23, abs=0.01)
+```
+
+## Context Management: The Underrated Skill
+
+The quality of AI output is directly proportional to the quality of context you provide. This is the real "prompt engineering" for coding — not the prompt text, but the codebase context.
+
+### Project Rules / Custom Instructions
+
+Every project I work on has a `.cursorrules` or equivalent configuration file.
+
+```markdown
+## Project: Weel Dashboard
+- TypeScript strict mode, no `any` types
+- React Server Components by default, client components only when needed
+- Use Tanstack Query for data fetching, not SWR or raw fetch
+- Tailwind CSS with our design system tokens (see @styles/tokens.ts)
+- Error boundaries at route level, toast notifications for recoverable errors
+- All API routes use the middleware chain: auth -> validate -> rateLimit -> handler
+- Database access through Drizzle ORM, never raw SQL
+- Tests use Vitest + Testing Library, prefer integration over unit tests
+```
+
+This single file eliminates 80% of the "AI generated code in the wrong style" problems. Without it, the model guesses — and it guesses wrong often enough to be annoying.
+
+### Incremental Context
+
+Don't dump your entire codebase into the context window. Be surgical.
+
+- Reference specific files with `@mentions`
+- Include the relevant types and interfaces
+- Point to an existing example of the pattern you want replicated
+- Paste the specific error message, not "it doesn't work"
+
+### The "Show, Don't Tell" Principle
+
+Instead of describing your coding style in words, show an example file.
+
+```
+"Generate a new API route for /api/preferences. Follow the exact same patterns 
+as @routes/api/settings.ts — same error handling, same validation approach, 
+same response format."
+```
+
+This works dramatically better than listing rules. The model is excellent at pattern matching when given a concrete example.
+
+## Measuring Impact Honestly
+
+I track my own productivity metrics, not because I'm obsessed with optimization, but because I want to know if these tools are actually helping or if I'm just spending the same time in a different way.
+
+### What I Measure
+
+- **Time from ticket to PR**: The end-to-end metric that matters
+- **PR review feedback**: More AI-generated code means more potential issues
+- **Bug rate**: Are AI-assisted features buggier?
+- **Code churn**: Am I rewriting AI code more often?
+
+### What I've Found
+
+- Features that are 80% CRUD / boilerplate: **2-3x faster** with AI
+- Features with complex business logic: **1.3-1.5x faster** (AI helps with scaffolding, human does the hard parts)
+- Debugging complex issues: **Same speed or slower** — the time I save on simple debugging is offset by time wasted when AI leads me down wrong paths
+- Learning new codebases: **1.5-2x faster** — "Explain this module" is genuinely useful
+
+The honest total across all my work: about **1.5-2x overall productivity improvement**. Not 10x. The 10x claims usually compare "AI doing a greenfield demo" to "human doing a mature codebase task" — apples to oranges.
+
+<Warning>
+If you measure 10x improvement, you're either doing the comparison wrong, or you were writing a lot of boilerplate that probably should have been automated anyway (code generation, templates, scaffolding tools).
+</Warning>
+
+## The Future: Where This Is Going
+
+Based on the trajectory I've seen from 2022 to now, here's what I'm preparing for:
+
+**More autonomous agents**: Claude Code and Cursor Composer are early versions of coding agents that will get dramatically better at multi-step tasks. The skill to develop now is learning to write good specifications, not good code.
+
+**AI-native architectures**: We'll design systems differently when AI is writing most of the code. More modular, more explicit interfaces, more configuration-over-code — because that's what AI works best with.
+
+**Review becomes the bottleneck**: When code generation is cheap, the expensive part is verifying correctness. Invest in testing infrastructure, type systems, and code review skills now.
+
+**Specialization of tools**: We'll use different AI tools for different tasks, just as we use different testing frameworks for different test types. The "one tool to rule them all" phase will pass.
+
+The developers who thrive will be the ones who learn to direct AI effectively — providing clear specifications, reviewing output critically, and knowing when to take back the keyboard. That's not a diminished role. That's engineering leadership at every level.

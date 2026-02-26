@@ -1,0 +1,497 @@
+---
+title: "React Server Components in Practice"
+description: "What RSC actually changes, when to use them, and practical patterns from shipping server components in production."
+---
+
+# React Server Components in Practice
+
+React Server Components represent the biggest architectural shift in React since hooks. And like hooks, the discourse has generated more confusion than clarity. Half the blog posts say RSC will change everything. The other half say they're overhyped. Having shipped server components in production, I can tell you: they're neither. They're a tool that changes specific things significantly and leaves other things alone.
+
+Here's what I've learned from actually using them.
+
+## The Mental Model Shift
+
+The single most important concept to internalize: **React components now run in two places**. Some run on the server. Some run on the client. The boundary between them is explicit, and understanding where that boundary sits is the entire game.
+
+Before RSC, the mental model was simple. All React runs in the browser. Data comes from APIs. Components render HTML from that data. The server sends a JavaScript bundle, the browser executes it, React hydrates, and the page is interactive.
+
+With RSC, the model is different:
+
+```
+Server Components:
+- Run on the server (or at build time)
+- Can directly access databases, file systems, and APIs
+- Send rendered HTML + a serialized component tree to the client
+- CANNOT use state, effects, or browser APIs
+- CANNOT use event handlers
+
+Client Components:
+- Run in the browser (like traditional React)
+- CAN use state, effects, event handlers, browser APIs
+- CANNOT directly access server resources
+- Must be explicitly marked with 'use client'
+```
+
+The key insight: **server components are the default**. In a Next.js App Router application, every component is a server component unless you add `'use client'` at the top. This inverts the old model where everything was client-side unless you explicitly did SSR.
+
+## When to Use Server vs Client Components
+
+This is the practical question everyone asks first. Here's my decision framework:
+
+### Use server components when
+
+- The component **fetches data** — server components can query databases directly
+- The component **renders static or semi-static content** — blog posts, product listings, dashboards
+- The component **uses large dependencies** that don't need to be in the client bundle — markdown parsers, syntax highlighters, date formatting libraries
+- The component **accesses server-only resources** — environment variables, file system, internal APIs
+
+### Use client components when
+
+- The component needs **interactivity** — clicks, inputs, form state, hover effects
+- The component uses **React state or effects** — `useState`, `useEffect`, `useRef`
+- The component uses **browser APIs** — `window`, `localStorage`, `IntersectionObserver`
+- The component needs **real-time updates** — WebSocket connections, polling
+
+### The gray area
+
+Many components have both static and interactive parts. A product card might have a static image, title, and price (server) but an "Add to Cart" button (client). The pattern for this is composition:
+
+```tsx
+// ProductCard.tsx — server component (no 'use client')
+import { AddToCartButton } from './AddToCartButton';
+
+async function ProductCard({ productId }: { productId: string }) {
+  const product = await db.products.findUnique({ where: { id: productId } });
+
+  return (
+    <div className="product-card">
+      <img src={product.imageUrl} alt={product.name} />
+      <h3>{product.name}</h3>
+      <p className="price">${product.price}</p>
+      <AddToCartButton productId={product.id} />
+    </div>
+  );
+}
+```
+
+```tsx
+// AddToCartButton.tsx — client component
+'use client';
+
+import { useState } from 'react';
+
+export function AddToCartButton({ productId }: { productId: string }) {
+  const [isAdding, setIsAdding] = useState(false);
+
+  async function handleClick() {
+    setIsAdding(true);
+    await addToCart(productId);
+    setIsAdding(false);
+  }
+
+  return (
+    <button onClick={handleClick} disabled={isAdding}>
+      {isAdding ? 'Adding...' : 'Add to Cart'}
+    </button>
+  );
+}
+```
+
+The server component does the data fetching and renders the static parts. The client component handles the interactive button. The product data never enters the client bundle — only the button logic does.
+
+<Tip>
+Push the `'use client'` boundary as far down the component tree as possible. The higher you place it, the more code ends up in the client bundle. Ideally, only leaf components that need interactivity are client components.
+</Tip>
+
+## Data Fetching Patterns
+
+RSC fundamentally changes data fetching. In the old model, you fetch data in `useEffect` or with a library like React Query. With RSC, server components fetch data directly — no hooks, no loading states, no waterfalls.
+
+### Direct database access
+
+```tsx
+// app/dashboard/page.tsx — server component
+import { db } from '@/lib/db';
+
+export default async function DashboardPage() {
+  const [metrics, recentActivity, notifications] = await Promise.all([
+    db.metrics.getForCurrentMonth(),
+    db.activity.getRecent(10),
+    db.notifications.getUnread(),
+  ]);
+
+  return (
+    <div>
+      <MetricsGrid metrics={metrics} />
+      <ActivityFeed items={recentActivity} />
+      <NotificationList notifications={notifications} />
+    </div>
+  );
+}
+```
+
+No `useEffect`. No loading state management. No React Query cache configuration. The data is fetched on the server, rendered to HTML, and sent to the client. The `Promise.all` parallelizes the queries — no waterfall.
+
+### Parallel data fetching with Suspense
+
+For more granular loading states, use Suspense boundaries:
+
+```tsx
+// app/dashboard/page.tsx
+import { Suspense } from 'react';
+
+export default function DashboardPage() {
+  return (
+    <div>
+      <Suspense fallback={<MetricsSkeleton />}>
+        <MetricsGrid />
+      </Suspense>
+      <Suspense fallback={<ActivitySkeleton />}>
+        <ActivityFeed />
+      </Suspense>
+      <Suspense fallback={<NotificationsSkeleton />}>
+        <NotificationList />
+      </Suspense>
+    </div>
+  );
+}
+
+// Each component fetches its own data
+async function MetricsGrid() {
+  const metrics = await db.metrics.getForCurrentMonth();
+  return <div>{/* render metrics */}</div>;
+}
+
+async function ActivityFeed() {
+  const activity = await db.activity.getRecent(10);
+  return <div>{/* render activity */}</div>;
+}
+```
+
+Each Suspense boundary is independent. If metrics load in 100ms and notifications take 500ms, the metrics section renders immediately while notifications show a skeleton. This is streaming — the server sends HTML as each section resolves.
+
+### When you still need client-side fetching
+
+RSC doesn't replace all client-side data fetching. You still need client-side fetching for:
+
+- **Real-time data** — WebSocket updates, polling for new messages
+- **User-initiated fetches** — Search-as-you-type, infinite scroll
+- **Optimistic updates** — Show the result before the server confirms
+- **Data that changes based on client state** — Filtered lists where the filter is client-side
+
+For these, React Query or SWR still make sense, but use them in client components:
+
+```tsx
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+
+export function SearchResults({ query }: { query: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['search', query],
+    queryFn: () => searchProducts(query),
+    enabled: query.length > 2,
+  });
+
+  if (isLoading) return <SearchSkeleton />;
+  return <ProductGrid products={data} />;
+}
+```
+
+## Streaming and Suspense
+
+Streaming is RSC's superpower for perceived performance. Instead of waiting for all data before sending any HTML, the server sends HTML as components resolve.
+
+### How it works
+
+1. Server starts rendering the page
+2. When a component is wrapped in `<Suspense>`, the server sends the fallback immediately
+3. When the component's data resolves, the server streams the real content
+4. The browser swaps the fallback for the real content — no full page reload
+
+```tsx
+// The user sees this progression:
+// T+0ms:   Shell + all skeletons render
+// T+100ms: Metrics section replaces its skeleton
+// T+200ms: Activity feed replaces its skeleton
+// T+500ms: Notifications replace their skeleton
+```
+
+This is dramatically better for LCP than waiting 500ms for all data before showing anything.
+
+### Nested Suspense boundaries
+
+You can nest Suspense boundaries for progressive loading:
+
+```tsx
+export default function DashboardPage() {
+  return (
+    <div>
+      <header>
+        <Suspense fallback={<UserNavSkeleton />}>
+          <UserNav />
+        </Suspense>
+      </header>
+      <main>
+        <Suspense fallback={<DashboardSkeleton />}>
+          <DashboardContent />
+        </Suspense>
+      </main>
+    </div>
+  );
+}
+
+async function DashboardContent() {
+  const user = await getUser();
+  return (
+    <div>
+      <h1>Welcome, {user.name}</h1>
+      <Suspense fallback={<MetricsSkeleton />}>
+        <MetricsGrid userId={user.id} />
+      </Suspense>
+      <Suspense fallback={<ActivitySkeleton />}>
+        <ActivityFeed userId={user.id} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+The outer Suspense shows a shell while `user` loads. Once the user resolves, the inner Suspense boundaries take over for the individual sections. This avoids the "blank page" problem while still streaming content progressively.
+
+<Warning>
+Don't wrap every component in Suspense. Too many independent loading states create a "popcorn" effect where content pops in randomly across the page. Group related content under a single Suspense boundary. The user should see meaningful sections appear, not individual widgets flickering in.
+</Warning>
+
+## Composition Patterns
+
+The server/client boundary creates new composition patterns that take some getting used to.
+
+### Pattern: Server component wrapping client component
+
+This is the most common pattern. The server component fetches data and passes it as props to a client component:
+
+```tsx
+// ServerWrapper.tsx — fetches data
+async function UserProfile({ userId }: { userId: string }) {
+  const user = await db.users.findUnique({ where: { id: userId } });
+  return <EditableProfile user={user} />;
+}
+
+// EditableProfile.tsx — handles interaction
+'use client';
+export function EditableProfile({ user }: { user: User }) {
+  const [isEditing, setIsEditing] = useState(false);
+  // ... interactive editing UI
+}
+```
+
+### Pattern: Client component accepting server component children
+
+Client components can render server components passed as `children`. This is crucial for layouts:
+
+```tsx
+// InteractiveLayout.tsx
+'use client';
+export function Sidebar({ children }: { children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = useState(true);
+  return (
+    <aside className={isOpen ? 'open' : 'closed'}>
+      <button onClick={() => setIsOpen(!isOpen)}>Toggle</button>
+      {children}
+    </aside>
+  );
+}
+
+// page.tsx — server component
+export default async function Page() {
+  return (
+    <Sidebar>
+      {/* This is a server component rendered inside a client component */}
+      <NavigationMenu />
+    </Sidebar>
+  );
+}
+```
+
+The `NavigationMenu` is a server component, but it's rendered through a client component's `children` prop. This works because the server component is pre-rendered on the server and passed as a serialized tree.
+
+### Pattern: Passing server data via context
+
+You can't use context providers in server components, but you can wrap a client context provider around server components:
+
+```tsx
+// app/layout.tsx — server component
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const theme = await getThemeFromDB();
+  return (
+    <html>
+      <body>
+        <ThemeProvider theme={theme}>
+          {children}
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
+
+// ThemeProvider.tsx — client component
+'use client';
+export function ThemeProvider({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+  return (
+    <ThemeContext.Provider value={theme}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+```
+
+## Common Mistakes
+
+Having migrated a production app to RSC, here are the mistakes I encountered:
+
+### 1. Making too many components client components
+
+The most common mistake is reflexively adding `'use client'` because a child component needs interactivity. Instead, extract the interactive part into its own client component and keep the parent as a server component.
+
+```tsx
+// ❌ Entire page is client because of one button
+'use client';
+export default function ProductPage({ params }: { params: { id: string } }) {
+  const [liked, setLiked] = useState(false);
+  // Now you can't use async/await for data fetching
+  // The entire page's code is in the client bundle
+}
+
+// ✅ Only the interactive part is client
+export default async function ProductPage({ params }: { params: { id: string } }) {
+  const product = await getProduct(params.id);
+  return (
+    <div>
+      <h1>{product.name}</h1>
+      <p>{product.description}</p>
+      <LikeButton productId={product.id} />  {/* Only this is client */}
+    </div>
+  );
+}
+```
+
+### 2. Passing non-serializable props across the boundary
+
+Server components pass props to client components via serialization. This means you can't pass functions, class instances, or other non-serializable values:
+
+```tsx
+// ❌ This will error — functions can't be serialized
+async function Page() {
+  const handleSubmit = (data: FormData) => { db.save(data); };
+  return <Form onSubmit={handleSubmit} />;
+}
+
+// ✅ Use server actions instead
+async function Page() {
+  async function handleSubmit(data: FormData) {
+    'use server';
+    await db.save(Object.fromEntries(data));
+  }
+  return <Form action={handleSubmit} />;
+}
+```
+
+### 3. Importing server-only code in client components
+
+If a client component imports a module that uses server-only APIs (database, file system), it will fail at build time. Use the `server-only` package to get clear errors:
+
+```tsx
+// lib/db.ts
+import 'server-only';
+import { PrismaClient } from '@prisma/client';
+export const db = new PrismaClient();
+```
+
+Now if any client component tries to import `db`, they'll get a clear build error instead of a confusing runtime crash.
+
+### 4. Forgetting about caching
+
+Server components run on every request by default in Next.js (dynamic rendering). For pages that don't need real-time data, opt into static rendering or add caching:
+
+```tsx
+import { unstable_cache } from 'next/cache';
+
+const getCachedProducts = unstable_cache(
+  async () => db.products.findMany({ where: { featured: true } }),
+  ['featured-products'],
+  { revalidate: 3600 } // Cache for 1 hour
+);
+
+export default async function FeaturedProducts() {
+  const products = await getCachedProducts();
+  return <ProductGrid products={products} />;
+}
+```
+
+## Performance Implications
+
+RSC has significant performance implications — mostly positive, but with nuances.
+
+### What improves
+
+**Smaller client bundles.** Server component code never reaches the browser. Dependencies used only in server components (database clients, markdown parsers, syntax highlighters) are completely excluded from the client bundle. I've seen bundle sizes drop 30-50% after migrating data-heavy pages to RSC.
+
+**No client-side data fetching waterfalls.** In a traditional SPA, the sequence is: download JS → execute JS → render → fetch data → re-render. With RSC: server fetches data → renders HTML → streams to client. The data is already embedded in the HTML.
+
+**Better LCP.** HTML arrives faster because the server can start sending content before all data is ready (streaming). The browser doesn't need to download and execute JavaScript before showing content.
+
+### What to watch
+
+**Server response time.** If your server is slow (cold starts, slow database queries), RSC won't help. You're moving the latency from the client to the server, not eliminating it. Optimize your server and database first.
+
+**Streaming overhead.** Each Suspense boundary adds a small amount of overhead to the response. Don't create 50 Suspense boundaries on a single page.
+
+**Server load.** Every page view now does server-side work. If you were previously serving a static SPA from a CDN, RSC means more server compute. Plan for this in your infrastructure.
+
+## Migration Strategy From SPA
+
+If you're migrating an existing SPA to RSC, don't rewrite everything at once. Here's the incremental approach I used:
+
+### Phase 1: App Router adoption (2-4 weeks)
+
+Move to Next.js App Router with `'use client'` at the top of every page. Everything still runs on the client — you're just adopting the new router.
+
+### Phase 2: Layout server components (1-2 weeks)
+
+Convert layouts (nav, sidebar, footer) to server components. These are usually static and easy to convert.
+
+### Phase 3: Data-heavy pages (4-8 weeks)
+
+One page at a time, move data fetching from client-side hooks to server components. Start with the simplest pages (static content, simple queries) and work toward complex ones.
+
+### Phase 4: Optimize boundaries (2-4 weeks)
+
+Review the server/client boundary placement. Push `'use client'` boundaries deeper. Extract interactive bits into smaller client components.
+
+```
+Phase 1: [========] 100% client components
+Phase 2: [==------] ~25% server (layouts)
+Phase 3: [====----] ~50% server (+ data pages)
+Phase 4: [======--] ~70% server (optimized boundaries)
+```
+
+<Info>
+Don't aim for 100% server components. Interactive applications will always have significant client-side code. The goal is to put the right code in the right place — data fetching and static rendering on the server, interactivity on the client.
+</Info>
+
+## My Take
+
+After shipping RSC in production, here's my honest assessment:
+
+RSC is the right direction for React. The mental model of "server components for data, client components for interaction" maps well to how most web applications actually work. The performance benefits are real — smaller bundles, no fetch waterfalls, streaming HTML.
+
+But the migration cost is significant. The `'use client'` boundary requires thinking about every component differently. Libraries need to be RSC-compatible. The debugging story is more complex (is this error from the server or the client?).
+
+For new projects: use RSC from the start. The patterns feel natural when you're not fighting existing code.
+
+For existing SPAs: migrate incrementally, page by page, prioritizing data-heavy pages where the performance gains are most significant.
+
+For purely interactive applications (real-time editors, canvas-based tools, complex forms): RSC offers less benefit. The bulk of your code is legitimately client-side. Don't force it.
+
+The future of React is hybrid — server where it makes sense, client where it must be. RSC gives us the primitives to make that split explicit and deliberate. That's a genuine step forward.

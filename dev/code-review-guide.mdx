@@ -1,0 +1,313 @@
+---
+title: "Code Review as a Staff Engineer"
+description: "How I approach code reviews at the staff level — what to look for, what to let go, and how to make reviews a force multiplier."
+---
+
+# Code Review as a Staff Engineer
+
+Early in my career, code review meant checking for bugs and enforcing style. As a senior engineer, it meant ensuring correctness, performance, and test coverage. As a staff engineer, I've had to completely rethink what code review is for.
+
+At the staff level, your review is not about the code. It's about the direction. You're looking at whether this change moves the codebase toward a better state or a worse one. You're looking at whether the engineer who wrote it learned something. You're looking at whether the pattern being established will be copied 50 times across the codebase.
+
+The leverage of a good staff-level review is enormous. The damage of a bad one is equally large.
+
+## The Purpose of Review at Different Levels
+
+Understanding how the purpose shifts helps calibrate your feedback:
+
+| Level | Primary Focus | Secondary Focus |
+|-------|--------------|-----------------|
+| Junior IC | Correctness, coding standards, learning | Bug prevention |
+| Mid-level IC | Design patterns, edge cases, test quality | Maintainability |
+| Senior IC | Architecture fit, performance, API design | Team standards |
+| Staff+ | System direction, precedent-setting, mentorship | Organizational impact |
+
+As a staff engineer, I might review a PR and have zero comments about the code itself but a significant question about whether this feature should exist in this service at all. That's not nitpicking — that's the highest-value feedback I can provide.
+
+## What to Focus On
+
+### 1. Architecture and system direction
+
+The most important question in any review: **does this change move us in the right direction?**
+
+- Does this create a new pattern? Is it a pattern we want repeated?
+- Does it respect existing service boundaries?
+- Will this scale to 10x the current load? Does it need to?
+- Are we adding coupling between things that should be independent?
+
+I once approved a PR that was technically flawless — clean code, good tests, great documentation. Two months later we realized it had established a pattern of direct database access from the frontend service, bypassing the API layer. Every subsequent PR followed the same pattern. By the time we caught it, 15 features were built on that foundation. The code was fine. The direction was wrong.
+
+### 2. Precedent and patterns
+
+Staff engineers have to think about **what happens when this pattern gets copied**. Because it will get copied. Engineers learn by reading existing code, and whatever patterns exist in the codebase become the de facto standard.
+
+When I see a PR that introduces a new way of doing something — a new data fetching pattern, a new state management approach, a new error handling strategy — I ask:
+
+- Is this intentionally different from how we do it elsewhere?
+- If so, should we migrate the old pattern to the new one?
+- If not, should this PR follow the existing pattern instead?
+
+```tsx
+// PR introduces a new data fetching pattern
+// This is fine code, but is it the pattern we want everywhere?
+
+export function useUsers() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(data => {
+        setUsers(data);
+        setLoading(false);
+      });
+  }, []);
+
+  return { users, loading };
+}
+```
+
+My review comment wouldn't be about the code quality. It would be: "We use React Query for data fetching in the rest of the app. Is there a reason this doesn't use `useQuery`? If we introduce a parallel pattern, teams won't know which to reach for."
+
+### 3. Naming and abstractions
+
+Names are forever (or at least for a very long time). A poorly named function or component will be misused for years. I spend more time on naming in reviews than on logic.
+
+- Does the name describe what it does, not how it does it?
+- Is the abstraction at the right level?
+- Will a new team member understand this name in 6 months?
+
+### 4. What's NOT in the PR
+
+Some of the most valuable review feedback is about what's missing:
+
+- Where are the tests for the error paths?
+- What happens when this API call fails?
+- Is there a migration for the database change?
+- Should this be behind a feature flag?
+- Did we update the runbook?
+
+### 5. API boundaries
+
+If a PR introduces or modifies a public API (a component API, a REST endpoint, a utility function's signature), that's where I spend 80% of my review time. Implementation can be refactored. APIs are much harder to change once consumers depend on them.
+
+```tsx
+// I would flag this API — it's mixing concerns
+export function useDataTable({
+  data,
+  columns,
+  sortBy,
+  filterBy,
+  pageSize,
+  onRowClick,
+  onSort,
+  onFilter,
+  enableVirtualization,
+  virtualizationOverscan,
+  stickyHeader,
+  // ... 15 more props
+}: DataTableConfig) { ... }
+
+// Suggestion: separate concerns
+export function useDataTable({ data, columns }: TableConfig) { ... }
+export function useSorting(config: SortConfig) { ... }
+export function useFiltering(config: FilterConfig) { ... }
+export function usePagination(config: PaginationConfig) { ... }
+```
+
+## What to Let Go
+
+This is where many staff engineers struggle. The instinct is to comment on everything you'd do differently. Don't. Every comment has a cost — it takes the author's time, delays shipping, and if it's a style preference rather than a correctness issue, it breeds resentment.
+
+### Let go of style preferences
+
+If the code works, is readable, and follows team conventions, don't suggest rewrites because you'd write it differently. This is the hardest habit to break.
+
+```tsx
+// Author wrote this
+const isEligible = user.age >= 18 && user.verified && !user.banned;
+
+// You might prefer this, but the author's version is equally clear
+const isEligible = [
+  user.age >= 18,
+  user.verified,
+  !user.banned,
+].every(Boolean);
+```
+
+Both are fine. Move on.
+
+### Let go of premature optimization
+
+Unless there's evidence of a performance problem, don't request optimization. "This could be more performant" is not actionable feedback. "This renders 10,000 DOM nodes and will cause scroll jank on mobile" is.
+
+### Let go of perfect tests
+
+If the tests cover the happy path and the critical error paths, that's often enough. You don't need 100% coverage on every PR. Focus test review on: are the right things being tested? Are the tests testing behavior or implementation details?
+
+### Let go of things automation can catch
+
+Linting, formatting, type errors, import ordering — these should be automated. If you're commenting on semicolons or trailing commas, your CI pipeline is broken, not the PR.
+
+<Tip>
+Before leaving a comment, ask yourself: "If this doesn't change, will it cause a bug, confuse a future reader, or take the architecture in the wrong direction?" If the answer is no, don't comment. Your restraint is a gift to the team.
+</Tip>
+
+## How to Write Useful Comments
+
+The format of a review comment matters as much as its content. Here's my system:
+
+### Prefix comments with intent
+
+I prefix every comment to signal its severity:
+
+- **`nit:`** — Optional, style preference. The author can ignore these.
+- **`suggestion:`** — I think this would be better, but the current approach works.
+- **`question:`** — I don't understand something. This might be fine or might be a problem.
+- **`concern:`** — I think there's an issue that should be addressed before merge.
+- **`blocking:`** — This must be fixed. I will not approve until it is. (I use this rarely.)
+
+```
+nit: `getUserData` might be clearer as `fetchUserProfile` 
+since it makes a network request.
+
+suggestion: Consider extracting this into a custom hook — 
+I've seen this pattern in 3 other components and it would 
+reduce duplication.
+
+question: What happens when `items` is empty here? I don't 
+see a guard clause and the `.reduce()` will return 
+`undefined`.
+
+blocking: This bypasses our authentication middleware. 
+All /api routes must go through `withAuth()`.
+```
+
+### Explain the "why," not just the "what"
+
+Bad comment: "Use `useMemo` here."
+
+Good comment: "This calculation iterates over 10K items on every render. Since this component re-renders on every keystroke (controlled input above), wrapping this in `useMemo` with `[items]` as a dependency would prevent recalculating on each keystroke."
+
+The good comment teaches. The engineer understands the problem, the solution, and the reasoning. Next time, they'll reach for `useMemo` on their own — and more importantly, they'll know *when* not to.
+
+### Offer alternatives, not just criticism
+
+Don't just say what's wrong. Show what you'd suggest:
+
+```
+This conditional logic is getting complex. One approach 
+that might simplify things:
+
+​```tsx
+const statusConfig = {
+  idle: { color: 'gray', label: 'Not started' },
+  running: { color: 'blue', label: 'In progress' },
+  success: { color: 'green', label: 'Complete' },
+  failed: { color: 'red', label: 'Failed' },
+} as const;
+
+const { color, label } = statusConfig[status];
+​```
+
+This removes the if/else chain and makes it easier 
+to add new statuses.
+```
+
+### Praise good work
+
+Reviews aren't just for criticism. When you see something well done, say so:
+
+```
+Great use of discriminated unions here. This makes 
+the state transitions really clear and prevents the 
+bug we had last sprint with partial state updates.
+```
+
+Positive comments reinforce good patterns and make the review process feel collaborative rather than adversarial.
+
+## Reviewing for Mentorship
+
+At the staff level, every review is a mentoring opportunity. The goal isn't just to improve this PR — it's to improve the engineer.
+
+### Calibrate to the author
+
+A review for a junior engineer looks different from a review for a senior engineer. For juniors, I focus on one or two learning points per review — not everything I could improve. Overwhelming someone with 30 comments teaches nothing except that code review is stressful.
+
+For senior engineers, I focus on system-level thinking: "Have you considered how this interacts with service X?" or "The API design here would be simpler if we inverted the responsibility."
+
+### Link to resources
+
+When introducing a concept, link to something the author can learn from:
+
+```
+This is a good candidate for the "state machine" pattern.
+Here's a great article on it: [link]
+
+The key idea is representing states as a discriminated 
+union so TypeScript prevents impossible transitions.
+```
+
+### Ask questions instead of giving directives
+
+"Have you considered using a factory pattern here?" is more empowering than "Use a factory pattern here." The question invites the author to think. The directive just tells them what to do.
+
+## Async Review Culture
+
+Most code review should be asynchronous. Here's how to make async review work:
+
+### For authors: make PRs reviewable
+
+1. **Keep PRs small.** Under 400 lines of meaningful changes. If it's bigger, split it.
+2. **Write a clear description.** What changed? Why? What's the testing strategy? What should the reviewer focus on?
+3. **Self-review first.** Read your own diff before requesting review. You'll catch half the issues yourself.
+4. **Annotate complex sections.** Leave comments on your own PR explaining non-obvious decisions.
+
+### For reviewers: be timely
+
+Review turnaround time is one of the strongest predictors of engineering velocity. My targets:
+
+- **First response:** Within 4 business hours
+- **Follow-up responses:** Within 2 business hours
+- **Total time to approval:** Within 1 business day for typical PRs
+
+If you can't review in time, say so: "I won't be able to review this until tomorrow. If it's urgent, please find another reviewer." Silence is the worst response.
+
+### When to have a conversation instead
+
+Sometimes a PR comment thread goes back and forth 4-5 times. This is a signal to stop typing and start talking. A 10-minute call resolves what would be a two-day async thread.
+
+My rule: **if a review comment gets more than 2 replies, switch to a synchronous conversation**. Then summarize the outcome in the PR for the record.
+
+<Warning>
+Never use code review as a power play. Blocking a PR to prove a technical point, leaving condescending comments, or using review as a performance evaluation tool destroys trust. Reviews should feel like pair programming, not an oral exam.
+</Warning>
+
+## Rubber-Stamping vs Blocking
+
+The two failure modes of code review are rubber-stamping everything (review adds no value) and blocking everything (review becomes a bottleneck).
+
+### When to approve quickly
+
+- The author is experienced and the change is low-risk
+- The change is behind a feature flag with easy rollback
+- The change is time-sensitive (incident fix, security patch)
+- The change is trivial (copy changes, config updates, dependency bumps)
+
+### When to block
+
+- The change introduces a security vulnerability
+- The change will break other consumers (API changes without migration)
+- The change establishes a dangerous precedent
+- The change bypasses agreed-upon architecture decisions
+
+Between these extremes is a gray zone where most PRs live. For these, I approve with comments: "Approving — the suggestions below would improve this but aren't blocking. Please address them in a follow-up if you agree."
+
+This approach respects the author's judgment while still surfacing improvement opportunities. It keeps the team moving without sacrificing quality.
+
+## Making Review a Force Multiplier
+
+A single staff engineer can review 3-5 PRs per day. Across a year, that's over a thousand opportunities to influence code quality, architectural direction, and engineer growth. No other activity at the staff level has that kind of leverage.
+
+The goal isn't perfect code. It's a team that writes better code over time, a codebase that moves in a coherent direction, and a culture where review is something people look forward to rather than dread. That's the force multiplier.

@@ -1,0 +1,244 @@
+---
+title: "The Second Brain for Engineers"
+description: "How I adapted Tiago Forte's PARA method for an engineering career — capturing decisions, architecture notes, and lessons learned."
+---
+
+# The Second Brain for Engineers
+
+I've been an engineer for over fifteen years, and the hardest problems I've solved weren't technical — they were retrieval problems. I'd remember that I solved something similar two years ago at Atlassian, but I couldn't find the decision doc. I'd recall a pattern from a conference talk, but the details had dissolved. I'd sit in an architecture review thinking _I've seen this failure mode before_, but the lesson was locked in a Slack thread that had long since scrolled into oblivion.
+
+That's when I realized: my brain is a terrible database.
+
+Tiago Forte's _Building a Second Brain_ gave me the vocabulary for what I'd been fumbling toward — an external system that captures, organizes, and resurfaces knowledge so your biological brain can focus on what it does best: thinking, connecting, and creating.
+
+But Forte's framework is designed for knowledge workers broadly. Engineers have specific needs — architecture decisions, debugging journals, system diagrams, code patterns, incident post-mortems. This is how I adapted the system for an engineering career.
+
+---
+
+## Why Engineers Specifically Need a Second Brain
+
+Most engineers I know are smart people with terrible knowledge management. We rely on tribal knowledge, bookmark folders we never revisit, and the hope that `git blame` will explain why a decision was made.
+
+Here's what that costs you:
+
+- **Repeated mistakes** — you debug the same class of issue every six months because you didn't capture the root cause
+- **Lost context** — you switch teams or companies and all those hard-won insights vanish
+- **Slow ramp-up** — onboarding to a new domain takes months because nobody documented the _why_ behind decisions
+- **Missed connections** — the pattern from your last project that would solve today's problem stays buried in your subconscious
+
+A second brain isn't about being organized for the sake of it. It's about compounding your engineering judgment over a career, not just a sprint.
+
+---
+
+## PARA Adapted for Engineering
+
+Forte's PARA system divides knowledge into four categories: **Projects**, **Areas**, **Resources**, and **Archive**. Here's how I've mapped them to engineering work.
+
+### Projects = Active Sprints and Initiatives
+
+Anything with a deadline and a definition of done. For me right now, that's things like "PromptLib v3 persona guardrails" or "Weel design system migration." Each project gets a folder with:
+
+- A brief (what, why, constraints, success criteria)
+- Running decision log
+- Links to PRs, Figma files, and Linear tickets
+- A "lessons learned" section I fill in during the project, not after
+
+<Tip>
+Start the lessons-learned section on day one of the project, not at the end. You'll forget the important micro-decisions if you wait for a retrospective.
+</Tip>
+
+### Areas = Domains You're Responsible For
+
+These are ongoing responsibilities without an end date. For me: frontend architecture, observability, developer experience, AI tooling, and team mentoring. Each area has:
+
+- Principles and standards docs I maintain
+- A running list of "things I'd improve if I had time"
+- Links to key dashboards, runbooks, and on-call playbooks
+- A curated reading list specific to that domain
+
+### Resources = Learning and Reference
+
+Topics I'm interested in but not actively responsible for. Machine learning papers, distributed systems concepts, leadership frameworks, new CSS features. This is where conference notes, course highlights, and interesting articles live.
+
+The key distinction: Resources are for _potential_ future use. They don't demand action — they're optionality.
+
+### Archive = Completed Work and Past Context
+
+When a project finishes, it moves to Archive with its decision log intact. When I leave a company or switch teams, that domain's Area folder gets archived too. Nothing is deleted — it's just moved out of the active view.
+
+This is where the real compound value lives. Three years from now, when someone asks "why did you choose that approach?", the answer is in the archive. When I'm facing a similar technical challenge, I search the archive first.
+
+| PARA Category | Engineering Mapping | Example Contents |
+|---|---|---|
+| **Projects** | Active sprints/initiatives | Briefs, decision logs, PR links, lessons |
+| **Areas** | Domains of responsibility | Standards, runbooks, dashboards, reading lists |
+| **Resources** | Learning and reference | Conference notes, papers, course highlights |
+| **Archive** | Completed work | Past project folders, old domain notes |
+
+---
+
+## The Capture Workflow
+
+A second brain is only as useful as its capture habits. If adding a note takes more than 30 seconds, you won't do it. Here's my current capture workflow, tuned for minimal friction.
+
+### Meetings → Notion
+
+Every meeting gets a Notion page from a template: date, attendees, decisions made, action items, and open questions. I fill this in _during_ the meeting, not after. The template takes 5 seconds to invoke. After the meeting, I spend 2 minutes tagging it with the relevant Project or Area.
+
+### Code Decisions → ADRs in the Repo
+
+Architecture Decision Records live in the codebase, not in a wiki. The format is simple: context, decision, consequences. When someone does a `git log` and wonders why we chose Redis over Memcached, the ADR is right there next to the code. I use a lightweight template:
+
+```markdown
+# ADR-042: Use Redis Streams for Event Processing
+
+## Context
+We need ordered event processing with consumer groups...
+
+## Decision
+Redis Streams over Kafka because our throughput is <10k events/sec
+and the team already operates Redis.
+
+## Consequences
+- Simpler ops, but we lose Kafka's partition scalability
+- If throughput exceeds 50k/sec, revisit this decision
+```
+
+### Learning → Heptabase
+
+When I'm learning something new — reading a paper, watching a talk, exploring a new technology — I use Heptabase's visual canvas. I can lay out concepts spatially, draw connections between ideas, and build a map of understanding that's far richer than linear notes.
+
+Heptabase is where I think. Notion is where I organize. The separation matters.
+
+### Quick Thoughts → Apple Notes
+
+Sometimes I have a half-formed idea in the shower or while walking the kids to school. Apple Notes is the fastest capture tool on iOS — it's already open before I've finished the thought. These fleeting notes get triaged into Notion or Heptabase during my weekly review.
+
+<Info>
+The goal of capture isn't perfection — it's preventing loss. A messy note that exists beats a perfect note you never wrote.
+</Info>
+
+---
+
+## Progressive Summarization for Technical Content
+
+Forte's progressive summarization technique is brilliant for technical content. The idea: every time you revisit a note, you add a layer of summarization.
+
+**Layer 1:** The raw capture — full meeting notes, article highlights, or lecture transcript.
+
+**Layer 2:** Bold the key points — the decisions, the surprising insights, the actionable bits.
+
+**Layer 3:** Highlight within the bold — the absolute essence, the things your future self needs in 10 seconds.
+
+**Layer 4:** An executive summary in your own words at the top.
+
+For engineering, I've added a fifth layer:
+
+**Layer 5:** The "So What" — a one-line statement connecting this note to a current or future project. _"This retry pattern applies to the payment processing service we're building in Q3."_
+
+This sounds like a lot of work, but you never do all five layers at once. Each layer happens on a different visit, when you have a different context. The note gets richer every time you touch it.
+
+---
+
+## The Weekly Review
+
+The weekly review is the heartbeat of the system. Without it, you have a pile of notes. With it, you have a thinking system. Mine takes about 45 minutes every Sunday evening.
+
+### The Process
+
+1. **Triage the inbox** — process quick captures from Apple Notes into their proper PARA locations (10 min)
+2. **Review active projects** — update status, note blockers, flag decisions needed (10 min)
+3. **Scan areas** — anything need attention this week? Any standards drifting? (5 min)
+4. **Progressive summarize** — revisit 3-5 notes from the past week, add a summarization layer (10 min)
+5. **Connect** — look for links between notes. Does Tuesday's architecture insight connect to Thursday's debugging session? (5 min)
+6. **Plan the week** — set the top 3 priorities for the coming week based on what surfaced (5 min)
+
+<Warning>
+Don't skip the "Connect" step. That's where the compound value lives. Individual notes are useful; connected notes are powerful.
+</Warning>
+
+### What I Look For During Review
+
+- Recurring themes across projects (signal of a systemic issue)
+- Contradictions between what I believed and what I observed
+- Notes that keep getting revisited (candidates for a blog post or internal doc)
+- Stale projects that should be archived or killed
+
+---
+
+## Connecting Notes to Build Insight
+
+The real magic of a second brain isn't storage — it's emergence. When you connect notes across domains, patterns reveal themselves that linear thinking misses.
+
+A few examples from my own system:
+
+- Connecting notes on **observability SLOs** with notes on **personal energy tracking** led me to build the concept of "personal SLOs" into my [productivity workflows](/productivity/workflows)
+- A Heptabase canvas linking **design system architecture** with **content strategy** patterns directly informed how I structured the MetaLabs component library
+- Notes from a debugging session on **retry storms** connected to notes on **habit formation loops** from Atomic Habits — both are about managing cascading feedback systems
+
+These connections don't happen through tagging or folder hierarchies. They happen when you spend time _looking_ at your notes with fresh eyes. The weekly review provides that space.
+
+---
+
+## The Tools
+
+I've tried dozens of tools. Here's where I've landed and why.
+
+| Tool | Role | Why It Wins |
+|---|---|---|
+| **Notion** | Structured knowledge, project management, meeting notes | Databases, templates, team sharing. The organizational backbone. |
+| **Heptabase** | Visual thinking, learning, concept mapping | Spatial canvas lets you _see_ relationships between ideas. Unmatched for learning. |
+| **GitHub** | ADRs, code-adjacent documentation | Docs live with the code. Reviewed in PRs. Version controlled. |
+| **Apple Notes** | Quick capture, fleeting thoughts | Speed. Nothing else launches as fast on iOS. |
+| **Linear** | Task tracking, sprint management | Clean interface, keyboard-driven. Bridges the gap between notes and action. |
+
+The principle: use the right tool for the right type of thinking. Don't try to make one tool do everything.
+
+<Tip>
+If you're just starting, use a single tool (Notion or Obsidian) and build the habit of capturing first. You can split into specialized tools later once you know what each thinking mode needs.
+</Tip>
+
+---
+
+## The "Future Self" Test
+
+The hardest question in knowledge management: what's worth capturing? My filter is simple — **the future self test**.
+
+Before I capture something, I ask: _Will this help the version of me six months from now?_
+
+Things that pass the test:
+
+- **Decisions and their reasoning** — especially the ones that felt uncertain
+- **Mistakes and what I learned** — the debugging session that took two days
+- **Patterns I noticed** — "every time we do X, Y happens"
+- **Mental models that shifted** — when I changed my mind about something
+- **Emotional context** — "I was frustrated during this project because..." (surprisingly useful for future retrospectives)
+
+Things that fail the test:
+
+- Meeting notes where nothing was decided
+- Articles I read passively without engaging
+- Information I can easily Google again
+- Notes that are really just procrastination disguised as productivity
+
+---
+
+## Getting Started
+
+If you're an engineer with no second brain system, don't try to build the whole thing at once. Here's my recommended starting sequence:
+
+1. **Week 1-2:** Start writing ADRs for every technical decision. Just the template: context, decision, consequences.
+2. **Week 3-4:** Add a meeting notes template. Use it for every meeting. Tag with project or area.
+3. **Week 5-6:** Set up PARA folders. Move your existing notes into the structure.
+4. **Week 7-8:** Start the weekly review. Even 20 minutes is enough to begin.
+5. **Month 3+:** Add progressive summarization. Start connecting notes.
+
+The system compounds. The first month feels like overhead. By month six, you're making better decisions faster because you have a searchable, connected history of everything you've learned. By year two, your second brain becomes your most valuable professional asset — more valuable than any single skill on your resume.
+
+The goal isn't to remember everything. It's to think better by offloading memory to a system you trust, so your biological brain can do what it was designed for: making connections, solving problems, and creating something new.
+
+---
+
+<Info>
+Related reads: [Productivity Workflows](/productivity/workflows) for how this system feeds into daily routines, [Atomic Habits](/books/atomic-habits) for building the capture habit, and [Tools & Setup](/dev/tools-and-setup) for the full tech stack.
+</Info>

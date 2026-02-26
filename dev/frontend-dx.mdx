@@ -1,0 +1,345 @@
+---
+title: "Developer Experience Is a Product"
+description: "How to treat DX as a product — measuring it, improving it, and making the case to leadership."
+---
+
+# Developer Experience Is a Product
+
+In 2019, I joined a team where running the local development environment took 45 minutes. Forty-five minutes of Docker builds, database seeding, and config file juggling before you could see a code change in the browser. Engineers would start the dev setup, go make coffee, check Slack, reply to emails, and maybe — maybe — their environment would be ready.
+
+That team had a retention problem. They blamed compensation. They blamed career growth. But in exit interviews, engineers kept saying the same thing: "I spent more time fighting tooling than writing code."
+
+Developer experience isn't a nice-to-have. It's a product. And like any product, it needs research, measurement, investment, and iteration.
+
+## What Is DX Really?
+
+Developer experience is the sum of friction (or lack thereof) an engineer encounters while doing their job. It encompasses:
+
+- **Local development speed** — How fast is the feedback loop from code change to result?
+- **CI/CD reliability** — How often does CI flake? How long does a pipeline take?
+- **Documentation quality** — Can I find what I need in under 60 seconds?
+- **Tooling quality** — Do my tools help me or fight me?
+- **Onboarding time** — How long until a new engineer ships their first PR?
+- **Cognitive load** — How much context do I need to hold in my head to make a change?
+
+The common thread is **friction**. Great DX removes friction. Poor DX adds it. And friction compounds — a 5-second delay in hot reload, experienced 200 times a day, is 16 minutes of waiting. Every day. For every engineer.
+
+## Measuring Developer Productivity
+
+You can't improve what you don't measure, but measuring developer productivity is notoriously hard. Here are the frameworks that actually work.
+
+### DORA Metrics
+
+The DORA (DevOps Research and Assessment) metrics are the most battle-tested framework for measuring engineering team performance:
+
+| Metric | Definition | Elite | High | Medium |
+|--------|-----------|-------|------|--------|
+| Deployment Frequency | How often you deploy | On demand (multiple/day) | Weekly-Monthly | Monthly-Quarterly |
+| Lead Time for Changes | Commit to production | < 1 hour | 1 day - 1 week | 1 week - 1 month |
+| Change Failure Rate | % of deploys causing failures | 0-15% | 16-30% | 31-45% |
+| Time to Restore Service | How fast you recover | < 1 hour | < 1 day | < 1 week |
+
+These metrics correlate with both engineering satisfaction and business outcomes. Teams with elite DORA metrics ship more, break less, and recover faster.
+
+### SPACE Framework
+
+The SPACE framework (from GitHub Research and Microsoft) provides a more holistic view:
+
+- **S**atisfaction and well-being — How happy are engineers? (survey)
+- **P**erformance — What's the outcome quality? (business metrics, reliability)
+- **A**ctivity — What are engineers doing? (commits, PRs, deploys — use cautiously)
+- **C**ommunication and collaboration — How well do teams work together? (review time, PR cycle time)
+- **E**fficiency and flow — How much uninterrupted focus time? (meeting load, context switches)
+
+<Warning>
+Never use activity metrics (commits, lines of code, PRs) as individual performance measures. They incentivize gaming and punish thoughtful work. An engineer who deletes 500 lines of unnecessary code has done more for your codebase than one who wrote 500 lines. Use activity metrics only in aggregate, at the team level, for trend analysis.
+</Warning>
+
+### The metrics I actually track
+
+At Weel, I track these specific metrics weekly:
+
+```
+┌─────────────────────────────────────────────┐
+│            DX Dashboard (Weekly)            │
+├─────────────────────────────────────────────┤
+│ Local Dev Startup Time      │  2m 15s (↓5s) │
+│ Hot Reload Speed (p95)      │  1.2s   (→)   │
+│ CI Pipeline Duration (p50)  │  8m 30s (↑30s)│
+│ CI Flake Rate               │  2.1%   (↓0.3)│
+│ PR Review Time (p50)        │  3.5h   (↓1h) │
+│ PR Merge to Deploy (p50)    │  1.2h   (→)   │
+│ Build Success Rate          │  97.8%  (↑0.2)│
+│ Onboarding Time (new eng)   │  2 days (→)   │
+└─────────────────────────────────────────────┘
+```
+
+Arrows show the trend from last week. This dashboard is posted in our engineering channel every Monday.
+
+## Local Dev Environment Speed
+
+This is where DX improvements have the highest ROI. Every engineer hits the local dev loop hundreds of times a day. Shaving off seconds here multiplies across the entire team.
+
+### Hot Module Replacement must be fast
+
+If your HMR takes more than 2 seconds, engineers will alt-tab while waiting. That alt-tab leads to Slack, which leads to a conversation, which leads to 5 minutes of lost focus. The 2-second HMR just cost you 5 minutes.
+
+```
+Target HMR times:
+- Style changes: < 100ms
+- Component changes: < 500ms
+- Route changes: < 1.5s
+- Full page reload: < 3s
+```
+
+If you're not hitting these, investigate your build tool:
+- **Vite** handles most React/Vue projects well out of the box
+- **Turbopack** (Next.js) is improving rapidly for Next.js apps
+- **SWC** instead of Babel reduces transform time by 20-70x
+
+### Docker dev environments
+
+If your dev environment requires Docker, optimize the Dockerfile for development, not production:
+
+```dockerfile
+# ❌ Production Dockerfile used for dev — rebuilds everything on code change
+FROM node:20-alpine
+COPY . .
+RUN npm ci && npm run build
+CMD ["npm", "start"]
+
+# ✅ Dev-optimized — uses bind mounts for code, caches dependencies
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+# Code is mounted via docker-compose, not COPY'd
+CMD ["pnpm", "dev"]
+```
+
+```yaml
+# docker-compose.dev.yml
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+      - /app/node_modules  # Don't mount over node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+```
+
+### Database seeding
+
+Fresh database with no data is useless for development. A production snapshot is dangerous. The middle ground: curated seed data that covers the main user flows.
+
+```tsx
+// seed.ts — runs in < 30 seconds, covers all main flows
+async function seed() {
+  const org = await createOrg({ name: 'Demo Company' });
+  const admin = await createUser({ org, role: 'admin', email: 'admin@demo.com' });
+  const editor = await createUser({ org, role: 'editor', email: 'editor@demo.com' });
+  
+  // Seed enough data to make the dashboard look realistic
+  await createInvoices(org, 50);
+  await createPayments(org, 30);
+  await createExpenseReports(org, 20, { statuses: ['draft', 'pending', 'approved'] });
+}
+```
+
+<Tip>
+Make seed data deterministic. Use fixed IDs and timestamps so engineers can reference specific records in discussions and tests. "Check invoice INV-001" is clearer than "check the first invoice in the list."
+</Tip>
+
+## CI/CD Feedback Loops
+
+The CI pipeline is the second most impactful DX surface (after local dev). Here's what I optimize:
+
+### Pipeline duration targets
+
+| Stage | Target | Action if exceeded |
+|-------|--------|--------------------|
+| Install deps | < 60s | Cache `node_modules`, use `pnpm install --frozen-lockfile` |
+| Type check | < 90s | Use `tsc --noEmit` with project references |
+| Lint | < 60s | Use Biome instead of ESLint for speed |
+| Unit tests | < 3min | Parallelize, only run affected tests |
+| Integration tests | < 5min | Parallelize, use test containers |
+| Build | < 3min | Use Turbopack/SWC, cache intermediate outputs |
+| **Total** | **< 12min** | |
+
+Every minute over 12 is a minute where an engineer switches context while waiting for CI. Context switches kill productivity.
+
+### Flake rate matters more than speed
+
+A 15-minute CI pipeline that's reliable is better than a 5-minute pipeline that flakes 10% of the time. Flakes destroy trust. Engineers stop looking at CI results, which means real failures get ignored.
+
+```bash
+# Track flake rate weekly
+# A "flake" is a CI failure that passes on re-run with no code change
+flake_rate = (retried_and_passed / total_runs) * 100
+```
+
+Target: under 2% flake rate. If you're above 5%, stop adding features and fix your tests.
+
+### The PR comment bot
+
+Every PR should get an automated comment with:
+- Build status and duration
+- Test results (passed/failed/skipped)
+- Bundle size delta
+- Lighthouse score delta
+- Preview deployment URL
+
+This information should be one glance, not three clicks into the CI dashboard.
+
+## Documentation Quality
+
+Documentation is the most underinvested area of DX. Teams spend months building internal tools and zero weeks documenting them.
+
+### The documentation hierarchy
+
+1. **README** — What is this? How do I run it? Where do I get help? (Every repo)
+2. **ADRs** (Architecture Decision Records) — Why did we choose X over Y? (Every significant decision)
+3. **Runbooks** — How do I debug/deploy/rollback this? (Every service)
+4. **API docs** — What endpoints exist? What do they accept/return? (Auto-generated)
+5. **Guides** — How do I do common tasks? (Top 10 workflows)
+
+### Measuring doc quality
+
+I track two metrics:
+- **Search success rate** — When someone searches internal docs, do they find what they need? (Track via doc platform analytics)
+- **Time to first answer** — When a new engineer has a question, how long until they find the answer? (Track via onboarding surveys)
+
+If engineers are asking questions in Slack that could be answered by docs, your docs are failing. Every Slack question about "how do I do X" should result in either finding the existing doc or writing a new one.
+
+## Onboarding Time as a Metric
+
+How long it takes a new engineer to ship their first PR is one of the best proxies for overall DX quality. It captures local dev setup, documentation, code navigability, and team processes in a single number.
+
+### What I track
+
+| Milestone | Target | Measured How |
+|-----------|--------|-------------|
+| Environment running | < 30 min | Timer from first `git clone` |
+| First code change visible | < 1 hour | Timer from environment running |
+| First PR opened | < 2 days | Git history |
+| First PR merged | < 3 days | Git history |
+| First production deploy | < 1 week | Deploy history |
+| "Fully productive" (self-assessed) | < 4 weeks | Survey |
+
+### The golden path
+
+A "golden path" is the documented, recommended way to accomplish common tasks. Instead of letting new engineers figure out the "right" way to do things, give them a path:
+
+```markdown
+## Golden Path: Adding a New API Endpoint
+
+1. Define the schema in `packages/api/schemas/`
+2. Generate the types: `pnpm generate:types`
+3. Create the handler in `apps/api/handlers/`
+4. Add the route in `apps/api/routes.ts`
+5. Write tests in `apps/api/handlers/__tests__/`
+6. Update the API client: `pnpm generate:client`
+
+Full guide: [link to detailed docs]
+```
+
+Golden paths reduce "how should I..." questions by 80% and prevent the proliferation of different approaches to the same task.
+
+## Internal Tooling as Product
+
+If your company has internal tools (CLIs, scripts, dashboards), treat them as products:
+
+### Product principles for internal tools
+
+1. **Have users, not hostages.** Engineers should choose to use your tool because it's the best option, not because they're mandated to.
+2. **Measure usage.** Add basic analytics. If nobody uses a feature, remove it.
+3. **Iterate on feedback.** Run quarterly surveys. Watch engineers use the tool. The frustrations they express casually are your roadmap.
+4. **Document it.** If your internal CLI has 40 commands and no documentation, it has 0 useful commands.
+
+### The internal CLI pattern
+
+I've built internal CLIs at every company I've worked at. They consolidate common workflows:
+
+```bash
+# Instead of remembering 5 different commands
+docker-compose -f docker-compose.dev.yml up -d
+pnpm install
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+
+# One command
+company-cli dev start
+
+# Other useful commands
+company-cli pr create          # Create a PR with template
+company-cli deploy staging     # Deploy to staging
+company-cli db reset           # Reset and reseed local database
+company-cli logs production    # Tail production logs
+company-cli docs search "auth" # Search internal documentation
+```
+
+The CLI is an investment that pays dividends daily. Start with the 5 most common workflows and expand from there.
+
+## Making the Business Case
+
+"We need to invest in developer experience" doesn't get budget. Here's how to make the case in language leadership understands.
+
+### Frame DX as velocity
+
+Leadership cares about shipping speed. DX directly impacts shipping speed.
+
+```
+Current state:
+- Engineers spend ~20% of time on environment/tooling issues
+- CI pipeline takes 18 minutes (engineering waits 2+ hours/day total)
+- New engineer productivity ramp: 6 weeks
+
+With DX investment (one quarter):
+- Environment/tooling time drops to ~5% (saving 6 hours/engineer/week)
+- CI drops to 8 minutes (saving 1 hour/engineer/day)
+- New engineer ramp: 3 weeks
+
+For a team of 30 engineers at $150K average salary:
+- Time savings: ~$500K/year in recovered engineering time
+- Faster onboarding: ~$100K/year (faster productivity per new hire)
+```
+
+These are rough numbers, but they're directionally correct and leadership responds to them.
+
+### Frame DX as retention
+
+Engineering turnover costs 6-12 months of salary per engineer (recruiting, onboarding, ramp-up, lost institutional knowledge). If poor DX contributes to even one additional departure per year, the cost exceeds any reasonable DX investment.
+
+### Frame DX as quality
+
+Slow CI leads to larger PRs (engineers batch changes to reduce CI waits). Larger PRs lead to worse reviews. Worse reviews lead to more bugs. More bugs lead to more incidents. More incidents lead to customer churn.
+
+The chain from "CI takes 20 minutes" to "customers leave" is real, even if it's indirect.
+
+<Info>
+Don't try to justify DX investment all at once. Start with the highest-impact, lowest-cost improvement (usually CI speed or local dev setup). Measure the before/after. Use those numbers to justify the next investment. Build momentum through demonstrated results.
+</Info>
+
+## DX at Different Scales
+
+DX challenges scale differently:
+
+### 5-person startup
+- **Focus:** Keep it simple. Docker Compose for local dev, GitHub Actions for CI, README for docs.
+- **Avoid:** Don't build a platform team. Don't buy expensive tools. Your DX investment is keeping the stack simple.
+
+### 30-person scaleup
+- **Focus:** Formalize the golden path. Document ADRs. Invest in CI speed. Build an internal CLI.
+- **Avoid:** Don't over-engineer. A Bash script that works is better than a Rust CLI that's half-finished.
+
+### 200+ person org
+- **Focus:** Dedicated platform/DX team. Internal developer portal. Self-service infrastructure. Measured onboarding time.
+- **Avoid:** Don't mandate tooling without understanding user needs. Run user research with your engineers like you would with external users.
+
+The throughline at every scale is the same: reduce friction, measure the reduction, and invest where the return is highest. DX is a product, and like any product, the best version of it is the one that solves real problems for real users.

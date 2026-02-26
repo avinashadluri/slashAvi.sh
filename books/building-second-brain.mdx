@@ -1,0 +1,177 @@
+---
+title: "Bookshelf · Building a Second Brain"
+description: "Tiago Forte's PARA system adapted for engineering — capturing, organizing, and using knowledge as a force multiplier."
+---
+
+# Building a Second Brain · Tiago Forte
+
+> _"Your mind is for having ideas, not holding them."_
+
+## Why I Picked This Up
+
+I was drowning in information. Hundreds of bookmarks I'd never revisit. Dozens of half-read articles. Meeting notes scattered across Notion, Google Docs, and Apple Notes. Architecture decisions trapped in Slack threads that Slack's search would swallow into oblivion within weeks.
+
+I'm an engineer who reads voraciously, attends conferences, works across multiple codebases, and maintains side projects. The volume of useful information flowing through my life was enormous — and my capture rate was close to zero. I was consuming knowledge without retaining it, which meant I was effectively not learning.
+
+Tiago Forte's book gave me a system for turning information consumption into a knowledge asset. Six months after implementing it, the difference was night and day.
+
+## The CODE Method
+
+Forte's core framework is CODE — four stages of turning raw information into creative output:
+
+### Capture — Keep What Resonates
+
+> _"Don't save things because they're important. Save things because they resonate."_
+
+The key insight: you can't capture everything, and you shouldn't try. Capture what creates an emotional or intellectual reaction — surprise, disagreement, excitement, confusion. Those reactions are signals that the information intersects with something you care about.
+
+**My engineering adaptation:** I capture:
+- Architecture patterns that surprised me (good or bad)
+- Debugging insights that took more than 30 minutes to discover
+- Conference talk moments that made me rethink an assumption
+- Code review feedback that taught me something new
+- Incident post-mortem learnings
+- Quotes from books and articles that I want to reference later
+
+**The tool doesn't matter. The habit does.** I use a combination of Notion quick capture (hotkey on desktop), Apple Notes (when mobile), and a dedicated Slack channel to myself for work-context captures. Everything gets triaged into Notion within 48 hours.
+
+<Tip>
+The capture threshold should be low. If you're debating whether to save something, save it. You can always delete later. You can never re-encounter a lost insight at the exact moment you need it.
+</Tip>
+
+### Organize — Save for Actionability
+
+This is where PARA comes in. Forte's organizational system is structured around actionability, not categories:
+
+| Level | What It Is | Time Horizon | My Example |
+|---|---|---|---|
+| **Projects** | Active initiatives with deadlines | Weeks to months | "Migrate auth service to OAuth2" |
+| **Areas** | Ongoing responsibilities | Indefinite | "Team mentorship," "Personal finance," "/avi content" |
+| **Resources** | Topics of interest | Reference | "Distributed systems patterns," "Telugu poetry forms" |
+| **Archives** | Completed or inactive items | Historical | "2023 Q4 architecture review" |
+
+The power of PARA is that it answers the question "Where does this go?" instantly. Information is organized by **when and how you'll use it**, not by what it's about.
+
+**My engineering adaptation:** My Notion workspace mirrors PARA exactly:
+- **Projects** — Each active work project, side project, and life project gets a folder. When I'm working on migrating a service, everything related — design docs, meeting notes, reference articles, code snippets — lives in that project folder.
+- **Areas** — Engineering leadership, personal development, financial management, health, /avi. These are the ongoing domains of my life that don't have deadlines but need consistent attention.
+- **Resources** — Topic-based reference material. "System design patterns," "TypeScript advanced patterns," "Book notes," "Telugu literature references." Things I don't need right now but will search for later.
+- **Archives** — Completed projects move here. I don't delete anything. Archived projects become reference material for future similar work.
+
+### Distill — Find the Essence
+
+> _"A note you can't find is a note that doesn't exist."_
+
+Forte's technique is "progressive summarization" — layering highlights on top of highlights until the essential insight emerges:
+
+1. **Layer 1:** The original note (captured text, article, etc.)
+2. **Layer 2:** Bold the key passages
+3. **Layer 3:** Highlight the boldest passages
+4. **Layer 4:** Write a brief executive summary at the top
+
+You don't do all layers at once. You progressively summarize each time you revisit a note. Most notes only ever get to Layer 2. The ones that keep coming back get distilled further.
+
+**My engineering adaptation:** For architecture decision records, I write an "executive summary" at the top of every document — 3 sentences max that capture the decision, the rationale, and the key trade-off. When I'm scanning through old decisions during a new design, I only need to read those 3 sentences to know whether the full document is relevant.
+
+For book notes, I progressively summarize over multiple re-reads. My notes on [Thinking, Fast and Slow](/books/thinking-fast-slow) started as 40 pages of highlights and are now distilled to a 2-page cheat sheet of the biases I encounter most frequently.
+
+### Express — Show Your Work
+
+Knowledge that stays in your notes is potential energy. Knowledge that you express — in writing, presentations, designs, conversations — becomes kinetic energy. The whole system exists to make expression easier and faster.
+
+**My engineering adaptation:** Every piece of content on /avi started as a note in my second brain. This book summary? It began as progressive highlights during my first read, became a distilled note after my second read, and became this page when I decided to share it.
+
+The [frameworks page](/thinkish/frameworks) is a direct expression of distilled notes from dozens of books and articles about mental models. The [productivity workflows](/productivity/workflows) page is an expression of notes captured over two years of experimenting with different systems.
+
+<Info>
+The "express" step is the one most people skip. They capture, organize, even distill — but never turn their notes into something shareable. Expression is where the learning compounds, because teaching forces understanding.
+</Info>
+
+## Intermediate Packets
+
+This concept was worth the price of the book alone. An "intermediate packet" is any discrete chunk of work that can be reused across projects:
+
+- A well-structured meeting agenda template
+- A post-mortem template with pre-filled sections
+- A code review checklist
+- An architecture decision record template
+- A set of interview questions for a specific role
+- A technical writing template for RFCs
+
+**Why this matters for engineers:** We constantly reinvent wheels. Every new project starts from scratch. Every new hire writes their own onboarding notes. Every incident response reinvents the post-mortem format.
+
+**My intermediate packets library includes:**
+- RFC template (used for every significant technical decision)
+- Post-mortem template (used for every incident of severity 2+)
+- 1:1 agenda template (used weekly with each report)
+- Technical design template (used for every new system or major refactor)
+- Book note template (used for every book in the [bookshelf](/books/deep-work))
+- Sprint retrospective format (used bi-weekly)
+
+Each one took 30 minutes to create and has saved me hundreds of hours collectively. The compounding is real.
+
+## Real Workflow: From Capture to Published Page
+
+Here's how a real piece of content flowed through the system:
+
+**Week 1:** I'm debugging a tricky race condition. The solution involves a pattern I haven't used before — optimistic locking with versioned state. I capture the pattern, the context, and the key insight into my Notion inbox.
+
+**Week 3:** I'm reading about distributed systems and encounter the same pattern described formally. I link it to my earlier capture note. I bold the key passages from both.
+
+**Week 6:** A teammate asks about handling concurrent writes. I pull up my note — it already has the practical example (from my debugging) and the theoretical framing (from my reading). I share it in 5 minutes instead of re-deriving from scratch.
+
+**Week 10:** I'm writing a section for our internal engineering wiki on concurrency patterns. My distilled note becomes the foundation of the document. The intermediate packet saved me hours of research because past-me had already done the work.
+
+This is the flywheel. Capture feeds organize. Organize feeds distill. Distill feeds express. Expression generates new captures from feedback and reactions. The system becomes more valuable over time.
+
+## What Changed After 6 Months
+
+**Before BASB:**
+- Information consumed: high. Information retained: low.
+- Starting every project from a blank page
+- Meeting notes lost in app-specific silos
+- "I read something about this once..." with no way to find it
+
+**After BASB:**
+- Capture rate went from ~5% to ~40% of useful information encountered
+- Projects start with relevant prior notes pre-loaded
+- Cross-domain connections surface naturally (a pattern from a book appears in a debugging session)
+- Content creation (like /avi) went from "stare at blank page" to "assemble and refine existing notes"
+
+The single biggest shift: **I stopped trying to remember things and started trusting my system to remember for me.** This freed up enormous cognitive bandwidth. Instead of holding 47 mental threads about things I'd read, heard, or learned, I captured them and let them go. My mind became calmer and more focused on the present task.
+
+## Tools and Setup
+
+My current stack (as of writing):
+
+| Tool | Role | Why |
+|---|---|---|
+| **Notion** | Primary knowledge base (PARA structure) | Flexible, great for databases and templates |
+| **Apple Notes** | Quick mobile capture | Fastest capture friction on iPhone |
+| **Readwise** | Book highlight sync | Automatically sends Kindle highlights to Notion |
+| **Obsidian** (experimental) | Networked thinking, graph view | Exploring for cross-note linking |
+| **Mintlify** | Public expression layer | /avi is the "express" stage of the system |
+
+The tool stack evolves. What doesn't change is the PARA structure and the CODE method. Those are the system. The tools are replaceable containers.
+
+## The Honest Caveats
+
+This system requires maintenance. If you don't triage your inbox weekly, it becomes a dumping ground. If you don't archive completed projects, your active view gets cluttered. If you don't progressively summarize, your notes are just hoarded highlights.
+
+I spend about 30 minutes per week on system maintenance — triaging the inbox, moving completed projects to archives, and doing one pass of progressive summarization on whatever note is most relevant to my current work.
+
+It's not zero-effort. But it's dramatically less effort than the alternative: losing knowledge, reinventing solutions, and starting every creative act from nothing.
+
+## Key Quotes I Revisit
+
+- _"Your mind is for having ideas, not holding them."_
+- _"We only need to capture what we can't afford to forget."_
+- _"Knowledge is the only asset that increases in value the more it is shared."_
+
+## Who Should Read This
+
+Anyone who reads a lot but retains little. Engineers who keep solving the same problems because they can't find their prior solutions. Leaders who spend too much time in meetings and not enough time synthesizing what they've learned. Anyone building a [Life OS](/productivity/workflows) and wondering how knowledge management fits in.
+
+<Note>
+Pairs well with: [Deep Work](/books/deep-work) for protecting the time to think, [Show Your Work](/books/show-your-work) for the expression mindset, and [Atomic Habits](/books/atomic-habits) for building the capture habit.
+</Note>

@@ -61,6 +61,20 @@
             ]
           },
           {
+            "group": "Engineering Deep Dives",
+            "pages": [
+              "dev/component-api-design",
+              "dev/typescript-patterns",
+              "dev/react-server-components",
+              "dev/design-systems-at-scale",
+              "dev/performance-budgets",
+              "dev/monorepo-guide",
+              "dev/frontend-dx",
+              "dev/code-review-guide",
+              "dev/debugging-production"
+            ]
+          },
+          {
             "group": "Observability",
             "pages": [
               "dev/observability-basics",
@@ -75,6 +89,17 @@
       {
         "tab": "Productivity",
         "groups": [
+          {
+            "group": "Systems & Frameworks",
+            "pages": [
+              "productivity/second-brain",
+              "productivity/deep-work-guide",
+              "productivity/12-week-year",
+              "productivity/energy-management",
+              "productivity/note-taking-systems",
+              "productivity/building-in-public"
+            ]
+          },
           {
             "group": "Tools & Apps",
             "pages": [
@@ -118,6 +143,18 @@
               "ai/ai-tools",
               "ai/rethinking-how-i-code-with-ai",
               "ai/future-of-it-jobs-in-the-age-of-ai-agents"
+            ]
+          },
+          {
+            "group": "Practical AI",
+            "pages": [
+              "ai/building-rag-systems",
+              "ai/prompt-engineering-guide",
+              "ai/local-llms-guide",
+              "ai/ai-pair-programming",
+              "ai/evaluating-llm-output",
+              "ai/shipping-ai-features",
+              "ai/agents-in-production"
             ]
           },
           {
@@ -169,12 +206,33 @@
         "tab": "Books",
         "groups": [
           {
-            "group": "Summaries",
+            "group": "Engineering & Career",
+            "pages": [
+              "books/pragmatic-programmer",
+              "books/staff-engineer"
+            ]
+          },
+          {
+            "group": "Thinking & Decision Making",
+            "pages": [
+              "books/thinking-fast-slow",
+              "books/four-thousand-weeks"
+            ]
+          },
+          {
+            "group": "Productivity & Habits",
+            "pages": [
+              "books/atomic-habits",
+              "books/deep-work",
+              "books/building-second-brain",
+              "books/reframe-brain"
+            ]
+          },
+          {
+            "group": "Creativity & Sharing",
             "pages": [
               "books/steal-like-an-artist",
-              "books/reframe-brain",
-              "books/deep-work",
-              "books/atomic-habits",
+              "books/show-your-work",
               "books/skill-with-people"
             ]
           }
@@ -186,6 +244,10 @@
           {
             "group": "Playbooks",
             "pages": ["thinkish/intro", "thinkish/frameworks", "thinkish/action-plan"]
+          },
+          {
+            "group": "Tools & Practices",
+            "pages": ["thinkish/decision-journal", "thinkish/mental-models-engineering"]
           }
         ]
       },
