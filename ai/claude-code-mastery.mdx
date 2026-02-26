@@ -1,0 +1,478 @@
+---
+title: "Claude Code Mastery: My Complete Workflow"
+description: "How I use Claude Code as my primary AI coding tool — CLAUDE.md patterns, custom commands, multi-file refactors, and the workflows that changed how I ship."
+---
+
+# Claude Code Mastery: My Complete Workflow
+
+Claude Code is the single tool that changed my development velocity the most. Not Copilot, not ChatGPT, not Cursor's agent mode — Claude Code. A terminal-based AI agent that reads your entire codebase, edits files, runs commands, and iterates on errors autonomously.
+
+I've used it to ship PromptLib, build features for MetaLabs, and handle complex refactors at Weel that would have taken days by hand. This is the complete guide to how I work with it — the mental models, the configuration, the patterns, and the hard-won lessons from hundreds of hours of usage.
+
+## Why Claude Code Over the Alternatives
+
+Every AI coding tool occupies a different niche. Here's where Claude Code sits and why I reach for it.
+
+**Cursor** is my IDE. I live there for day-to-day coding — tab completions, inline edits, quick chat questions. But Cursor's agent mode operates within the IDE's constraints: it's great for editing a handful of files, less great for cross-cutting changes that touch 30 files and require running test suites to verify.
+
+**ChatGPT / Claude.ai** are conversation tools. They're excellent for design discussions, brainstorming, and one-off code generation. But they can't see your codebase, can't run your tests, can't iterate.
+
+**Claude Code** is the power tool. It's a full agent running in your terminal with access to your filesystem, your shell, and your git history. It reads files, writes files, runs commands, and loops until the task is done. For complex, multi-file tasks that require understanding your codebase holistically, nothing else comes close.
+
+The mental model: Cursor for editing, Claude Code for engineering.
+
+## Setting Up CLAUDE.md: Your Project's Brain
+
+The single most impactful thing you can do with Claude Code is write a good `CLAUDE.md` file. This file lives in your project root and gives Claude Code persistent context about your project — architecture, conventions, patterns, and constraints.
+
+Without `CLAUDE.md`, Claude Code guesses. With it, Claude Code operates like a team member who's read your contributing guide, your architecture docs, and your style guide.
+
+### My CLAUDE.md Template
+
+```markdown
+# Project: PromptLib
+
+## Architecture
+- Next.js 14 App Router with TypeScript strict mode
+- Database: Postgres via Drizzle ORM (schema in src/db/schema.ts)
+- Auth: NextAuth.js with GitHub + Google providers
+- Styling: Tailwind CSS + shadcn/ui components
+- API: Server actions preferred over API routes for mutations
+- State: Zustand for client state, Tanstack Query for server state
+
+## Directory Structure
+- src/app/ — App Router pages and layouts
+- src/components/ — Shared React components (PascalCase)
+- src/lib/ — Utility functions and shared logic
+- src/db/ — Database schema, migrations, and queries
+- src/actions/ — Server actions (grouped by domain)
+- src/hooks/ — Custom React hooks
+
+## Conventions
+- All components use named exports, no default exports
+- Server components by default, "use client" only when necessary
+- Error handling: use Result<T, E> pattern from src/lib/result.ts
+- Database queries go through repository functions in src/db/queries/
+- Zod schemas for ALL external input validation
+- Tests live next to source files: Component.test.tsx
+
+## Commands
+- `pnpm dev` — development server
+- `pnpm test` — run vitest
+- `pnpm test:e2e` — run Playwright e2e tests
+- `pnpm db:push` — push schema changes
+- `pnpm db:generate` — generate migrations
+- `pnpm lint` — ESLint + Prettier check
+- `pnpm typecheck` — TypeScript compilation check
+
+## Patterns to Follow
+- See src/actions/prompts.ts for server action patterns
+- See src/components/PromptCard.tsx for component patterns
+- See src/db/queries/prompts.ts for database query patterns
+
+## Things to Avoid
+- No `any` types — use `unknown` and narrow
+- No barrel exports (index.ts re-exports)
+- No React.FC — use plain function declarations
+- Don't use fetch for internal API calls — use server actions
+```
+
+### What Makes a Good CLAUDE.md
+
+The key is **specificity over verbosity**. Don't describe what TypeScript is. Tell Claude Code exactly how *your* project uses it.
+
+**Reference example files.** Instead of writing paragraphs about your coding style, point to a file: "See `src/actions/prompts.ts` for the server action pattern." Claude Code will read that file and replicate the patterns.
+
+**Include commands.** Claude Code needs to know how to run your tests, start your dev server, and check types. If it doesn't know `pnpm test`, it can't verify its own work.
+
+**List anti-patterns.** "No barrel exports" saves you from undoing Claude Code's well-intentioned refactoring toward a pattern you don't use.
+
+<Tip>
+Put `CLAUDE.md` in your git repo. It benefits every developer who uses Claude Code on your project, and it evolves with your codebase. I review CLAUDE.md changes in PRs like any other documentation.
+</Tip>
+
+### Nested CLAUDE.md Files
+
+For monorepos or complex projects, use nested `CLAUDE.md` files in subdirectories. Claude Code merges them hierarchically — the root file provides global context, and subdirectory files add local specifics.
+
+```
+CLAUDE.md                    # Global: monorepo structure, shared conventions
+packages/api/CLAUDE.md       # API-specific: Hono routes, middleware chain
+packages/web/CLAUDE.md       # Web-specific: Next.js patterns, component library
+packages/shared/CLAUDE.md    # Shared: types, utilities, validation schemas
+```
+
+## Custom Slash Commands
+
+Claude Code supports custom slash commands that you define in `.claude/commands/`. These are reusable prompts for tasks you do repeatedly.
+
+### Setting Up Commands
+
+```bash
+mkdir -p .claude/commands
+```
+
+Each command is a markdown file whose content becomes the prompt.
+
+```markdown
+<!-- .claude/commands/add-feature.md -->
+I want to add a new feature. Here's the specification:
+
+$ARGUMENTS
+
+Follow these steps:
+1. Read the existing patterns in the codebase first
+2. Create the necessary types/schemas
+3. Implement the database layer (if needed)
+4. Implement the server actions
+5. Create the UI components
+6. Add tests for the critical path
+7. Run the test suite and fix any failures
+8. Run the type checker and fix any errors
+```
+
+```markdown
+<!-- .claude/commands/review.md -->
+Review the changes I've made since the last commit. Specifically:
+
+1. Read the git diff (staged and unstaged)
+2. Check for bugs, security issues, and performance problems
+3. Verify the changes follow the patterns in CLAUDE.md
+4. Check that tests cover the new code paths
+5. Suggest improvements, but distinguish between "must fix" and "nice to have"
+
+Be direct. If the code is fine, say so. Don't invent problems.
+```
+
+```markdown
+<!-- .claude/commands/test-gen.md -->
+Generate tests for: $ARGUMENTS
+
+Steps:
+1. Read the source file and understand its public API
+2. Identify the critical paths and edge cases
+3. Write tests using the patterns in the nearest existing test file
+4. Focus on behavior, not implementation — test what the function does, not how
+5. Include edge cases: empty inputs, null/undefined, boundary values, error paths
+6. Run the tests to make sure they pass
+```
+
+Now I can type `/add-feature user preferences with email notification settings` and get a structured, multi-step implementation.
+
+### Commands I Use Daily
+
+| Command | Purpose |
+|---|---|
+| `/add-feature` | Scaffold and implement a new feature end-to-end |
+| `/review` | Code review of uncommitted changes |
+| `/test-gen` | Generate tests for a specific file or function |
+| `/fix` | Diagnose and fix a bug from an error message |
+| `/refactor` | Refactor a specific module with constraints |
+| `/migrate` | Database migration for a schema change |
+| `/document` | Generate documentation for a module |
+
+## The "Architect Then Implement" Pattern
+
+This is the workflow pattern that most improved my output quality with Claude Code. Instead of asking Claude Code to implement a feature directly, I split the work into two phases.
+
+### Phase 1: Architect
+
+```
+I need to add real-time notifications to PromptLib. Users should get notified 
+when someone comments on their prompt, stars it, or forks it.
+
+Before writing any code, create a technical plan:
+1. What components/files need to change?
+2. What's the data model?
+3. What's the notification delivery mechanism?
+4. What are the edge cases?
+5. What's the migration path for existing data?
+
+Don't implement anything yet. Just give me the plan.
+```
+
+Claude Code reads the codebase, understands the existing architecture, and produces a plan. I review the plan, push back on decisions I disagree with ("use Postgres LISTEN/NOTIFY instead of polling"), and approve the approach.
+
+### Phase 2: Implement
+
+```
+Good plan. Implement it with these adjustments:
+- Use server-sent events instead of WebSocket (simpler, we don't need bidirectional)
+- Store notifications in the existing Postgres database, not Redis
+- Start with email notifications only, we'll add in-app later
+
+Go ahead and implement. Run tests after each major step.
+```
+
+Now Claude Code implements with clear direction. The result is dramatically better than "add notifications to the app."
+
+<Warning>
+Skipping the architect phase for complex features is the number one cause of bad Claude Code output. If a feature touches more than 3 files, architect first. Always.
+</Warning>
+
+## Multi-File Refactors
+
+This is where Claude Code truly shines. Refactors that touch dozens of files and require maintaining consistency across all of them.
+
+### Example: Migrating from Express to Hono
+
+```
+Migrate the API from Express to Hono. Here are the constraints:
+- Keep the existing route structure and endpoint paths
+- Port all middleware (auth, validation, rate limiting, error handling)
+- Update the test files to use Hono's test client
+- Update the Dockerfile and docker-compose.yml
+- Run the full test suite after migration and fix any failures
+
+Migrate one route file at a time, running tests after each to catch regressions early.
+```
+
+Claude Code handles this methodically — reading each Express route, translating to Hono's API, updating imports, running tests, fixing failures. What would take me a full day of tedious, error-prone manual work takes an hour of Claude Code working while I review.
+
+### Example: Adding TypeScript Strict Mode
+
+```
+Enable TypeScript strict mode incrementally:
+1. Turn on strict: true in tsconfig.json
+2. Run tsc --noEmit and capture all errors
+3. Fix errors file by file, starting with leaf modules (no dependencies)
+4. After each file, run tsc --noEmit to verify error count decreases
+5. Don't use @ts-ignore or any type assertions unless truly necessary
+6. For complex type issues, add a TODO comment and move on
+```
+
+### The Key to Good Refactors
+
+**Be explicit about constraints.** "Don't change the public API" or "maintain backward compatibility" prevents Claude Code from making sweeping changes that break consumers.
+
+**Specify the verification step.** "Run tests after each file" ensures Claude Code catches regressions incrementally rather than creating a mess that's hard to debug.
+
+**Order of operations matters.** "Start with leaf modules" prevents cascading type errors that make the refactor feel impossible.
+
+## Code Review and Bug Hunting
+
+Claude Code is an excellent code reviewer because it can actually read and run the code, not just look at diffs.
+
+### Using Claude Code for Reviews
+
+```
+Review the changes in this branch compared to main:
+1. git diff main...HEAD
+2. For each changed file, read the full file (not just the diff) to understand context
+3. Check for: bugs, security issues, missing error handling, performance problems
+4. Verify that tests cover the changes
+5. Check for consistency with existing patterns
+
+Rate each finding as: 🔴 must fix, 🟡 should fix, 🟢 nice to have
+```
+
+### Bug Hunting
+
+When a bug report comes in, I paste the reproduction steps into Claude Code:
+
+```
+Users report that saving a prompt with more than 10 tags silently drops 
+tags beyond the 10th. The API returns 200 but the database only has 10 tags.
+
+Find the root cause. Check:
+1. The API validation layer (is there a limit?)
+2. The database schema (is there a constraint?)
+3. The server action that handles saving
+4. The UI component that sends the data
+
+Don't fix it yet — just find the cause and explain it.
+```
+
+Claude Code traces through the code path systematically. It reads the validation schema, finds the `.max(10)` in the Zod schema that someone added months ago, and identifies the root cause in minutes.
+
+## Test Generation Workflows
+
+My test generation workflow with Claude Code follows a specific pattern that produces better tests than "write tests for this file."
+
+```
+Read src/actions/prompts.ts and its dependencies.
+
+Generate tests that cover:
+1. Happy path for each exported function
+2. Error paths: invalid input, database errors, auth failures
+3. Edge cases: empty arrays, very long strings, concurrent calls
+4. Integration: test the full action → database → response chain
+
+Use the testing patterns from src/actions/__tests__/users.test.ts as a reference.
+Run the tests after writing them.
+```
+
+The key additions: referencing an existing test file for style, requesting specific edge cases, and having Claude Code run the tests immediately.
+
+<Tip>
+After Claude Code generates tests, I always review them for one thing: are they testing behavior or implementation? If a test breaks when you refactor the internals (without changing the API), it's a bad test. I delete those and tell Claude Code why.
+</Tip>
+
+## Conversation Management
+
+Knowing when to start a fresh conversation versus continuing an existing one is an underappreciated skill.
+
+### Start Fresh When
+
+- You're switching to a completely different task
+- The conversation has accumulated errors or wrong assumptions
+- Claude Code seems confused about the current state of files (it made changes but is referring to old versions)
+- You've made significant manual changes that Claude Code doesn't know about
+- The context window is getting full (you'll notice slower responses and more mistakes)
+
+### Continue When
+
+- You're iterating on the same feature
+- Claude Code needs to remember decisions from earlier in the conversation ("use SSE, not WebSocket")
+- You're in a debug loop — context about what's been tried is valuable
+- The review/implementation cycle is ongoing
+
+### The "Checkpoint" Technique
+
+For long sessions, I periodically create checkpoints:
+
+```
+Let's checkpoint. Summarize:
+1. What we've implemented so far
+2. What decisions we've made
+3. What's left to do
+4. Any open questions
+```
+
+This forces Claude Code to consolidate its understanding and gives me a summary I can paste into a fresh conversation if I need to start over.
+
+## Claude Code + Git Workflows
+
+Claude Code understands git natively. I use this extensively.
+
+### Branch-Per-Feature with Claude Code
+
+```bash
+git checkout -b feat/notifications
+```
+
+Then in Claude Code:
+
+```
+We're on branch feat/notifications. Implement the notification system 
+from our earlier plan. Make atomic commits after each logical unit of work 
+with descriptive commit messages.
+```
+
+Claude Code will make commits as it works — one for the schema, one for the server actions, one for the UI components, one for the tests. The git history ends up clean and reviewable.
+
+### Pre-PR Cleanup
+
+```
+Before I open a PR, review everything on this branch:
+1. git log main..HEAD — review commit messages
+2. git diff main...HEAD — review all changes
+3. Check for: console.logs, TODO comments, commented-out code, debug artifacts
+4. Verify all tests pass
+5. Run the linter and fix any issues
+6. Suggest improvements to commit messages if needed
+```
+
+### Handling Merge Conflicts
+
+```
+I've pulled main and have merge conflicts. The conflicting files are:
+- src/db/schema.ts
+- src/actions/prompts.ts
+
+Resolve the conflicts by:
+1. Reading both versions
+2. Understanding the intent of each change
+3. Merging them correctly (both changes should be preserved)
+4. Running tests to verify the resolution
+```
+
+## Dealing with Context Limits
+
+Claude Code has a large context window, but it's not infinite. Here's how I work within the limits.
+
+**Scope your requests.** "Refactor the entire codebase" will exhaust context. "Refactor the authentication module" won't.
+
+**Use file references, not pastes.** Claude Code can read files itself. Don't paste entire files into the conversation — tell it which files to read.
+
+**Summarize previous work.** If a conversation is getting long, summarize what's been done and start a new conversation with that summary.
+
+**Break large tasks into subtasks.** Instead of one conversation that implements an entire feature, use separate conversations for architecture, implementation, testing, and review.
+
+## Integration with CI/CD
+
+Claude Code output should flow through the same quality gates as human-written code.
+
+```yaml
+# .github/workflows/ci.yml — Claude Code's output gets the same treatment
+name: CI
+on: [push, pull_request]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm test:e2e
+```
+
+I also use Claude Code to write CI workflows themselves:
+
+```
+Add a GitHub Actions workflow that:
+1. Runs on PRs to main
+2. Type checks, lints, and runs all tests
+3. Runs Playwright e2e tests
+4. Checks for migration drift (schema matches migrations)
+5. Posts a comment with test coverage diff
+```
+
+## Real Examples from Shipping
+
+### PromptLib: Building the Prompt Version History
+
+I used the architect-then-implement pattern:
+
+**Architect phase:** Claude Code analyzed the existing prompt schema, proposed a `prompt_versions` table with a foreign key to `prompts`, designed the server action for creating versions, and identified that the UI needed a diff viewer component.
+
+**Implement phase:** Over a 45-minute session, Claude Code created the migration, updated the schema, wrote server actions for creating and fetching versions, built a version history sidebar component, added a simple diff view, wrote tests, and made 6 atomic commits.
+
+I spent my time reviewing diffs and testing the UI manually. Total wall-clock time: about 90 minutes for what would have been a full day of work.
+
+### MetaLabs: API Rate Limiter Refactor
+
+The existing rate limiter was per-route with duplicated logic. I asked Claude Code to extract it into a configurable middleware. It read all 23 route files, identified the rate limiting patterns, designed a unified middleware with per-route configuration, migrated every route, and updated the tests. Zero regressions.
+
+## Tips Nobody Tells You
+
+**Start with a warm-up.** Before asking Claude Code to implement anything, ask it to read key files first: "Read `CLAUDE.md`, `src/db/schema.ts`, and `src/actions/prompts.ts`. Then tell me what patterns you see." This loads context before the real work begins.
+
+**Be specific about what not to change.** "Implement notifications but don't modify the existing Prompt type or change any existing API endpoints" prevents scope creep.
+
+**Use Claude Code to write CLAUDE.md.** Ask it to read your codebase and generate a `CLAUDE.md` file. Then edit it. This is faster than writing from scratch and catches conventions you've internalized but never documented.
+
+**Check Claude Code's shell commands.** Before approving destructive commands (rm, database operations), read them carefully. Claude Code is generally cautious, but mistakes happen.
+
+**Pair Claude Code with Cursor.** I use Claude Code in a terminal pane inside Cursor. Claude Code makes the big changes, and I use Cursor's inline editing for quick touch-ups on Claude Code's output. Best of both worlds.
+
+## Common Pitfalls
+
+**Over-scoping.** "Refactor the entire application to use a new state management approach" is too much. Break it into modules.
+
+**Under-specifying.** "Add auth" could mean anything. "Add GitHub OAuth with NextAuth.js, protected routes via middleware, and a session provider in the root layout" gets good results.
+
+**Not reviewing output.** Claude Code is good, not perfect. Review every change, especially security-sensitive code, database migrations, and deletion operations.
+
+**Ignoring the test suite.** If Claude Code generates code that passes the type checker but you don't have tests, you're flying blind. The power of Claude Code is the feedback loop: implement → test → fix → verify. Without tests, it's just implement → hope.
+
+**Fighting the tool.** If Claude Code's approach is fundamentally different from what you want, don't try to steer it incrementally through 10 corrections. Start a new conversation with clearer instructions.
+
+<Info>
+Claude Code is a force multiplier, not a replacement for engineering judgment. The developers who get the most out of it are the ones who know exactly what they want built and use Claude Code to build it faster — not the ones who ask Claude Code to make architectural decisions for them.
+</Info>
+
+The best workflow is one where you're the architect and Claude Code is the builder. You design, Claude Code implements, you review, Claude Code iterates. That loop, once it's dialed in with a good `CLAUDE.md` and custom commands, is the fastest way I've ever shipped software.

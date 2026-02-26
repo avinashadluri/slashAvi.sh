@@ -1,0 +1,479 @@
+---
+title: "Cursor: The AI-Native IDE Playbook"
+description: "Advanced Cursor workflows — rules, context management, multi-file editing, and the setup that makes me 3x faster."
+---
+
+# Cursor: The AI-Native IDE Playbook
+
+I switched to Cursor from VS Code in early 2024 and haven't looked back. It's not just "VS Code with AI bolted on" — it's a fundamentally different development experience once you learn to use it properly. Most developers I watch use maybe 30% of what Cursor offers. They use tab completion and occasionally ask the chat a question.
+
+This guide covers everything I've learned from using Cursor as my primary IDE for over a year across PromptLib, MetaLabs, and daily work at Weel.
+
+## Why Cursor as My Primary IDE
+
+The short answer: context-aware AI that understands my entire codebase, not just the open file.
+
+VS Code + Copilot gives you autocomplete that's aware of the current file and maybe a few open tabs. Cursor gives you autocomplete that's aware of your entire project — types, imports, naming conventions, architecture patterns. The quality difference in suggestions is immediately noticeable.
+
+But autocomplete is the least interesting part. The real value is in Composer (multi-file agent), context management (`@` mentions), and project rules. Combined, they make Cursor the closest thing to an AI pair programmer that actually understands your codebase.
+
+## Project Rules: The Foundation
+
+Before you do anything else in Cursor, set up project rules. These are persistent instructions that shape every AI interaction in your project.
+
+### .cursor/rules/ Directory
+
+Cursor reads rules from `.cursor/rules/` in your project root. I use multiple rule files for different concerns.
+
+```markdown
+<!-- .cursor/rules/general.mdc -->
+---
+description: General project conventions
+globs:
+alwaysApply: true
+---
+
+## Project: PromptLib
+- TypeScript strict mode, no `any` types
+- Next.js 14 App Router
+- React Server Components by default
+- Tailwind CSS + shadcn/ui
+- Drizzle ORM for database access
+- Zod for all input validation
+- Named exports only, no default exports
+
+## Code Style
+- Functional components with explicit return types
+- Use `type` for object shapes, `interface` for contracts that may be extended
+- Prefer early returns over nested conditionals
+- Error handling: Result<T, E> pattern (see src/lib/result.ts)
+- No console.log in committed code — use the logger from src/lib/logger.ts
+```
+
+```markdown
+<!-- .cursor/rules/components.mdc -->
+---
+description: React component conventions
+globs: src/components/**/*.tsx
+alwaysApply: false
+---
+
+## Component Patterns
+- File structure: imports → types → component → helpers
+- Props type named {ComponentName}Props
+- Use forwardRef when the component wraps a native element
+- Separate presentational and container logic
+- Co-locate tests: Component.test.tsx next to Component.tsx
+- Use cn() from src/lib/utils for conditional classNames
+
+## Example Structure
+See src/components/PromptCard.tsx as the canonical example.
+```
+
+```markdown
+<!-- .cursor/rules/database.mdc -->
+---
+description: Database and data access patterns
+globs: src/db/**/*
+alwaysApply: false
+---
+
+## Database Conventions
+- Schema definitions in src/db/schema.ts
+- All queries go through repository functions in src/db/queries/
+- Use Drizzle's query builder, never raw SQL
+- Transactions for multi-table writes
+- Always include createdAt/updatedAt timestamps
+- Soft delete via deletedAt column, never hard delete
+- Pagination: cursor-based for lists, offset for admin views
+```
+
+### Why Multiple Rule Files
+
+Glob-based rules activate only when you're working in relevant files. When I'm editing a React component, Cursor loads the component rules. When I'm in the database layer, it loads the database rules. This keeps context focused and prevents rule bloat.
+
+<Tip>
+Commit your `.cursor/rules/` directory. Every team member who uses Cursor benefits, and the rules evolve through code review like any other project convention.
+</Tip>
+
+## Context Management: The Core Skill
+
+The quality of Cursor's output is 80% determined by the context you provide. Learning to manage context is the highest-leverage Cursor skill.
+
+### The @ Mention System
+
+`@` mentions are how you feed Cursor specific context. Master these:
+
+| Mention | What It Does | When to Use |
+|---|---|---|
+| `@file.tsx` | Includes the full file | When Cursor needs to see an implementation |
+| `@folder/` | Includes all files in a folder | For understanding a module's structure |
+| `@Docs` | Searches indexed documentation | For library API questions |
+| `@Web` | Searches the web | For recent library updates or unfamiliar APIs |
+| `@Git` | Includes git context | For understanding recent changes |
+| `@Codebase` | Semantic search of your project | For finding relevant code you can't pinpoint |
+| `@Definitions` | Includes symbol definitions | For understanding type hierarchies |
+
+### The "Context Sandwich" Technique
+
+This is my most effective pattern for getting high-quality output from Cursor. Structure your prompt in three layers:
+
+**Top bun — What you want:**
+```
+Add a notification preferences page to the settings section.
+```
+
+**Filling — Context references:**
+```
+Follow the patterns in @src/app/settings/profile/page.tsx for the page structure.
+Use the form components from @src/components/ui/form.tsx.
+The notification types are defined in @src/db/schema.ts (see notificationPreferences table).
+The existing settings layout is in @src/app/settings/layout.tsx.
+```
+
+**Bottom bun — Constraints and specifics:**
+```
+- Server component for the page, client component for the form
+- Use the same validation pattern as the profile page
+- Add a toast notification on successful save
+- Don't create any new UI components — use existing shadcn/ui primitives
+```
+
+This pattern works because it gives Cursor the goal, the examples to follow, and the boundaries to stay within. The output quality difference versus a bare "add notification preferences" is night and day.
+
+### Indexing Documentation
+
+Cursor can index external documentation. I keep these indexed for every project:
+
+```
+Settings → Features → Docs → Add new doc
+
+- Next.js App Router docs
+- Drizzle ORM docs
+- shadcn/ui component docs
+- Tailwind CSS docs
+- Zod docs
+```
+
+Then when I ask about a library feature, `@Docs` searches this indexed documentation and includes relevant sections in context. "How do I use @Docs Drizzle's `with` clause for eager loading?" gives a much better answer than asking without the docs.
+
+## Composer: Multi-File Agent Mode
+
+Composer is Cursor's most powerful feature and the one most people underuse. It's an agent that can read, create, and edit multiple files in a single operation.
+
+### When to Use Composer vs Chat vs Inline Edit
+
+| Task | Tool | Why |
+|---|---|---|
+| Quick question about code | Chat (Cmd+L) | Fast, doesn't modify files |
+| Edit a single block of code | Inline Edit (Cmd+K) | Focused, minimal context needed |
+| Multi-file feature implementation | Composer (Cmd+I) | Agent that can read and edit across files |
+| Explaining existing code | Chat with @file | Read-only exploration |
+| Refactoring a module | Composer | Needs to coordinate changes across files |
+| Generating tests | Composer | Needs to read source, create test file |
+| Debugging with stack traces | Chat | Conversation-heavy, iterative |
+
+### Composer Best Practices
+
+**Be specific about scope.** "Update the user settings feature" is too vague. "Add an email notification toggle to `@src/app/settings/notifications/page.tsx` with a server action in `@src/actions/notifications.ts` and update the schema in `@src/db/schema.ts`" is precise.
+
+**Review changes before accepting.** Composer shows you a diff for every file it modifies. Read these diffs. Accept file by file, not all at once. I reject roughly 15-20% of Composer's changes and either revise my prompt or make manual adjustments.
+
+**Use Composer for generation, Chat for iteration.** Generate the initial implementation with Composer, then switch to Chat or inline edit for refinements. Composer is a sledgehammer — don't use it to hang a picture frame.
+
+### Agent Mode: The Full Loop
+
+Cursor's Agent mode in Composer lets the AI run terminal commands, read output, and iterate. This is similar to Claude Code but within the IDE.
+
+```
+Create a new API endpoint for user notifications:
+1. Add the schema to src/db/schema.ts
+2. Generate the migration with `pnpm db:generate`
+3. Create the server action in src/actions/notifications.ts
+4. Add the page at src/app/settings/notifications/page.tsx
+5. Run `pnpm typecheck` and fix any type errors
+6. Run `pnpm test` and fix any failures
+```
+
+Agent mode will execute this step by step, running commands and fixing issues. It's incredibly powerful for end-to-end feature scaffolding.
+
+<Warning>
+Agent mode can run terminal commands. Review them before approving, especially commands that modify data, install packages, or touch git. I've seen it run `npm install` for a package I didn't want or `git commit` when I wasn't ready.
+</Warning>
+
+## Model Selection Strategy
+
+Cursor lets you choose different models for different interactions. My strategy:
+
+### Tab Completion
+**Model: Cursor's built-in model** — It's fast and optimized for code completion. Speed matters more than reasoning depth here. Don't change this.
+
+### Chat and Inline Edit
+**Model: Claude Sonnet** — Best balance of quality and speed for interactive coding. I use Claude for about 90% of my chat interactions. It handles TypeScript, React, and Next.js better than any other model I've tested.
+
+**When I switch to GPT-4o:** For questions about well-known APIs, configuration files, and infrastructure topics. GPT-4o has broader training data for niche tools.
+
+**When I switch to Claude Opus:** For complex architectural questions, nuanced code reviews, and when I need the model to hold a complex multi-file context in its head. More expensive, but worth it for critical decisions.
+
+### Composer / Agent
+**Model: Claude Sonnet** — Agent tasks require both strong coding ability and tool use reliability. Claude Sonnet is the best at following multi-step instructions without going off-track.
+
+```
+My model rotation:
+- Tab completion: Default (always)
+- Quick questions: Claude Sonnet
+- Code generation: Claude Sonnet
+- Architecture discussions: Claude Opus
+- Infrastructure/DevOps: GPT-4o
+- Composer agent: Claude Sonnet
+```
+
+<Info>
+Model pricing matters. Opus costs significantly more per token than Sonnet. I use Opus only when the reasoning quality justifiably matters — architectural decisions, complex debugging, nuanced code review. For everything else, Sonnet is the better value.
+</Info>
+
+## Keyboard Shortcuts That Matter
+
+These are the shortcuts I use dozens of times per day. Everything else is nice-to-know.
+
+| Shortcut | Action | When I Use It |
+|---|---|---|
+| `Tab` | Accept completion | Constantly |
+| `Escape` | Reject completion | When suggestion is wrong |
+| `Cmd+K` | Inline edit | Quick single-block changes |
+| `Cmd+L` | Open chat | Questions, explanations |
+| `Cmd+I` | Open Composer | Multi-file operations |
+| `Cmd+Shift+L` | Add selection to chat | Send code to chat with context |
+| `Cmd+Enter` | Submit with codebase context | When I want broader search |
+| `@` | Context menu | Referencing files, docs, web |
+
+### Speed Patterns
+
+**The select-and-ask pattern:** Select a block of code → `Cmd+Shift+L` → ask your question. This sends the selected code to chat with full file context. Faster than manually `@`-mentioning the file and describing which function you mean.
+
+**The inline-chain pattern:** `Cmd+K` on a function → "Add error handling" → accept → `Cmd+K` again → "Add JSDoc" → accept. Chain small inline edits instead of describing everything at once. Each edit is smaller and more likely to be correct.
+
+**The Composer-then-refine pattern:** Use Composer for the initial multi-file generation, accept the changes, then `Cmd+K` on individual functions to refine. This is faster than trying to get Composer to produce perfect output in one pass.
+
+## Cursor for Code Review
+
+I use Cursor's AI to pre-review code before I review it myself or submit it for team review.
+
+### Self-Review Before PR
+
+```
+I'm about to open a PR. Review the changes since main:
+
+@Git diff against main
+
+Check for:
+- Bugs or logic errors
+- Missing error handling
+- Security issues (XSS, injection, auth bypass)
+- Performance problems (N+1 queries, unbounded loops)
+- Inconsistencies with project patterns
+- Missing tests for new code paths
+- Leftover debug code (console.log, TODO comments)
+
+Be brutally honest. Better I catch it now than in review.
+```
+
+### Reviewing Others' PRs
+
+I check out the PR branch locally, open it in Cursor, and ask:
+
+```
+This PR adds a webhook notification system. Review the new files in 
+@src/webhooks/ for:
+- Are the retry semantics correct? (exponential backoff with jitter)
+- Is the signature validation secure?
+- Are there race conditions in concurrent webhook delivery?
+- Does the dead letter queue logic handle all failure modes?
+```
+
+Having the AI pre-screen saves time and catches issues I might miss on first pass, especially in unfamiliar code areas.
+
+## Cursor for Debugging
+
+### Stack Trace Analysis
+
+Copy a stack trace, paste into Chat with `@` file references:
+
+```
+Getting this error in production:
+
+TypeError: Cannot read properties of undefined (reading 'id')
+    at getNotificationPrefs (src/actions/notifications.ts:47:23)
+    at SettingsPage (src/app/settings/page.tsx:12:9)
+
+Look at @src/actions/notifications.ts and @src/db/queries/notifications.ts. 
+What's causing this and how should I fix it?
+```
+
+Cursor reads both files, identifies that the query can return `null` when a user has no notification preferences row, and suggests adding a null check with a sensible default.
+
+### The "Rubber Duck" Pattern
+
+Sometimes I use Cursor chat as a rubber duck — explaining the problem helps me think through it, and the AI's response often points me in a useful direction.
+
+```
+I'm debugging a race condition. Here's what I know:
+- Two concurrent requests can both read the counter as 5
+- Both increment to 6 and write
+- Result: counter is 6 instead of 7
+
+The relevant code is in @src/actions/analytics.ts.
+What locking mechanism would you recommend given we're using 
+Postgres and Drizzle ORM?
+```
+
+## Workspace Setup for Monorepos
+
+For monorepos with multiple packages, I set up Cursor to handle context correctly.
+
+### Multi-Root Workspace
+
+```json
+// .cursor/workspace.json
+{
+  "folders": [
+    { "path": "packages/web", "name": "Web App" },
+    { "path": "packages/api", "name": "API Server" },
+    { "path": "packages/shared", "name": "Shared Types" }
+  ]
+}
+```
+
+### Package-Specific Rules
+
+```markdown
+<!-- packages/web/.cursor/rules/web.mdc -->
+---
+description: Web app specific conventions
+globs:
+alwaysApply: true
+---
+- Next.js App Router patterns
+- Import shared types from @repo/shared
+- Use the API client from src/lib/api-client.ts, never raw fetch
+- All pages are server components unless they need interactivity
+```
+
+```markdown
+<!-- packages/api/.cursor/rules/api.mdc -->
+---
+description: API server specific conventions
+globs:
+alwaysApply: true
+---
+- Hono framework with Zod validation
+- Import shared types from @repo/shared
+- Middleware chain: auth → validate → rateLimit → handler
+- All handlers return typed responses using the ApiResponse<T> wrapper
+```
+
+This way, when I'm working in the web package, Cursor's suggestions follow web conventions. When I switch to the API, it follows API conventions. No cross-contamination.
+
+## Daily Workflows: What a Typical Day Looks Like
+
+### Morning: PR Reviews
+
+1. Pull latest changes
+2. Check open PRs — open each branch in Cursor
+3. Use Chat with `@Git` to understand changes
+4. Use AI-assisted review to pre-screen for issues
+5. Leave comments, approve, or request changes
+
+### Feature Work: Afternoon
+
+1. Read the ticket/spec
+2. Write a brief plan in Chat: "I need to implement X. Given `@src/...`, what's the approach?"
+3. Use Composer to scaffold the feature (types, schema, server actions, page skeleton)
+4. Review and accept Composer changes file-by-file
+5. Use inline edit (`Cmd+K`) to refine individual functions
+6. Write tests — Composer for scaffolding, inline edit for edge cases
+7. Self-review with Chat before committing
+
+### Bug Fixes: As They Come
+
+1. Paste error/stack trace into Chat
+2. `@` mention the relevant files
+3. Ask for root cause analysis
+4. Implement fix (usually inline edit — bugs tend to be localized)
+5. Add regression test
+
+## TypeScript and React-Specific Tips
+
+### Type Generation
+
+```
+Given this API response shape (paste JSON), generate:
+1. A Zod validation schema
+2. The inferred TypeScript type
+3. A transformer function that normalizes the data
+
+Follow the patterns in @src/lib/schemas/
+```
+
+Cursor is exceptionally good at generating Zod schemas from example JSON. I use this constantly when integrating with external APIs.
+
+### Component Generation from Design
+
+```
+Create a component that matches this design:
+- Card with user avatar (left), name + email (center), role badge (right)
+- Hover state: light background highlight
+- Click: navigates to /users/[id]
+- Use @src/components/ui/avatar.tsx and @src/components/ui/badge.tsx
+- Follow the pattern in @src/components/TeamMemberCard.tsx
+```
+
+By referencing existing components and providing a concrete description, Cursor generates components that fit the existing design system rather than inventing their own styles.
+
+### Server Component Patterns
+
+```
+Convert @src/app/dashboard/page.tsx from a client component to a server 
+component. Move the data fetching to the server level. Extract the interactive 
+parts into a separate client component in the same directory.
+```
+
+Cursor handles the server/client component split well when you're explicit about what should move where.
+
+## Advanced Patterns
+
+### The "Teach Then Apply" Pattern
+
+When I want Cursor to understand a pattern it doesn't know, I teach it first:
+
+```
+Here's how we handle optimistic updates in this codebase:
+
+1. Client calls server action
+2. Before awaiting, update local state optimistically
+3. On success: do nothing (state is already correct)
+4. On failure: revert local state and show toast
+
+See the implementation in @src/hooks/useOptimisticAction.ts 
+and usage in @src/components/PromptCard.tsx (handleStar function).
+
+Now apply this same pattern to the comment like/unlike feature in 
+@src/components/CommentCard.tsx.
+```
+
+### The "Diff Review" Pattern
+
+After Composer makes changes, before accepting:
+
+```
+Explain every change you made and why. I want to understand the reasoning 
+before I accept these edits.
+```
+
+This catches misunderstandings early. If Cursor's reasoning doesn't match your intent, reject and re-prompt rather than accepting and debugging later.
+
+<Info>
+Cursor is at its best when you treat it as a skilled collaborator who needs clear direction, not an oracle that reads your mind. The investment in learning context management, rules, and the right tool for each task pays for itself within the first week.
+</Info>
+
+The playbook is simple: rules for consistency, context for quality, Composer for velocity, and human judgment for everything that matters. Once you internalize these patterns, going back to a non-AI IDE feels like coding with one hand tied behind your back.

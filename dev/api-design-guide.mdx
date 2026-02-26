@@ -1,0 +1,661 @@
+---
+title: "API Design for Full-Stack Engineers"
+description: "REST, GraphQL, tRPC — how to design APIs that frontend and backend engineers both love."
+---
+
+# API Design for Full-Stack Engineers
+
+I've designed APIs from both sides of the boundary — as the frontend engineer cursing an inconsistent REST API, and as the backend engineer trying to serve five different clients with one endpoint. That dual perspective is rare and valuable, and it's shaped how I think about API design.
+
+The best APIs aren't the ones with the cleverest architecture. They're the ones that frontend engineers can consume without reading the docs, backend engineers can extend without breaking clients, and on-call engineers can debug at 3am without context. That's the bar.
+
+## REST Done Right
+
+REST is the default. Not because it's the best abstraction for every problem, but because it's the most widely understood, the most tooling-rich, and the lowest-friction choice for most teams. But "REST" as practiced by most teams is a mess of inconsistencies. Here's how to do it properly.
+
+### Resource naming
+
+Resources are nouns, not verbs. Endpoints describe what you're operating on, not what you're doing.
+
+```
+✅ Good:
+GET    /api/v1/invoices              # List invoices
+POST   /api/v1/invoices              # Create an invoice
+GET    /api/v1/invoices/:id          # Get one invoice
+PATCH  /api/v1/invoices/:id          # Update an invoice
+DELETE /api/v1/invoices/:id          # Delete an invoice
+
+GET    /api/v1/invoices/:id/payments # List payments for an invoice
+POST   /api/v1/invoices/:id/payments # Record a payment against an invoice
+
+❌ Bad:
+POST   /api/v1/createInvoice
+GET    /api/v1/getInvoiceById
+POST   /api/v1/updateInvoiceStatus
+POST   /api/v1/invoice/send
+```
+
+Use plural nouns. Always. `invoices`, not `invoice`. The endpoint `/invoices` returns a collection. `/invoices/123` returns a single item from that collection. It reads naturally.
+
+### Nested resources vs flat
+
+Nest resources when there's a clear parent-child relationship AND the child doesn't make sense without the parent:
+
+```
+GET /api/v1/invoices/:invoiceId/line-items          ✅ Line items belong to an invoice
+GET /api/v1/organizations/:orgId/invoices            ✅ Invoices belong to an organization
+
+GET /api/v1/invoices/:invoiceId/clients/:clientId    ❌ Client exists independently
+GET /api/v1/clients/:clientId                        ✅ Better — flat resource
+```
+
+My rule: **nest at most one level deep**. Beyond that, use query parameters or separate endpoints.
+
+### Status codes that mean something
+
+Most APIs use 200 for everything and put the real status in the response body. Don't be that API.
+
+| Code | Meaning | When to Use |
+|------|---------|-------------|
+| `200` | OK | Successful GET, PATCH, or action |
+| `201` | Created | Successful POST that created a resource |
+| `204` | No Content | Successful DELETE |
+| `400` | Bad Request | Validation failed, malformed request body |
+| `401` | Unauthorized | No auth credentials, or credentials are expired |
+| `403` | Forbidden | Auth is valid, but user lacks permission |
+| `404` | Not Found | Resource doesn't exist |
+| `409` | Conflict | Duplicate creation, optimistic lock conflict |
+| `422` | Unprocessable Entity | Syntactically valid but semantically wrong |
+| `429` | Too Many Requests | Rate limit exceeded |
+| `500` | Internal Server Error | Unhandled exception on the server |
+
+<Warning>
+The distinction between 401 and 403 matters. 401 means "I don't know who you are." 403 means "I know who you are, and you can't do this." Mixing them up confuses frontend error handling. A 401 should trigger a re-auth flow. A 403 should show a permissions error.
+</Warning>
+
+### Pagination
+
+Offset-based pagination is fine for most use cases. Cursor-based is better for real-time data or very large datasets.
+
+```tsx
+// Offset-based (simple, supports "jump to page 5")
+// GET /api/v1/invoices?page=2&pageSize=20
+
+interface PaginatedResponse<T> {
+  data: T[];
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+// Cursor-based (consistent with real-time inserts/deletes)
+// GET /api/v1/invoices?cursor=abc123&limit=20
+
+interface CursorPaginatedResponse<T> {
+  data: T[];
+  meta: {
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+```
+
+I use offset-based for admin/dashboard UIs where users need to jump to specific pages, and cursor-based for infinite-scroll UIs and audit logs where consistency matters more than random access.
+
+### Filtering and sorting
+
+Use query parameters. Keep them consistent across all endpoints.
+
+```
+GET /api/v1/invoices?status=SENT&status=OVERDUE&clientId=abc&sort=-dueDate&page=1&pageSize=20
+```
+
+Conventions I follow:
+
+- **Filtering:** Field name as key, value as value. Multiple values = multiple instances of the key (or comma-separated).
+- **Sorting:** `sort` parameter. Prefix with `-` for descending. `sort=-createdAt,invoiceNumber` means "newest first, then alphabetical by number."
+- **Search:** `search` or `q` parameter for full-text search across relevant fields.
+
+```tsx
+// Backend implementation with Prisma
+function buildWhereClause(query: InvoiceQueryDto): Prisma.InvoiceWhereInput {
+  const where: Prisma.InvoiceWhereInput = {};
+
+  if (query.status?.length) {
+    where.status = { in: query.status };
+  }
+
+  if (query.clientId) {
+    where.clientId = query.clientId;
+  }
+
+  if (query.search) {
+    where.OR = [
+      { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
+      { client: { name: { contains: query.search, mode: 'insensitive' } } },
+    ];
+  }
+
+  if (query.dueDateFrom || query.dueDateTo) {
+    where.dueDate = {
+      ...(query.dueDateFrom && { gte: new Date(query.dueDateFrom) }),
+      ...(query.dueDateTo && { lte: new Date(query.dueDateTo) }),
+    };
+  }
+
+  return where;
+}
+```
+
+### API versioning
+
+Version in the URL path. Not in headers, not in query parameters. URL versioning is visible, debuggable, and cacheable.
+
+```
+/api/v1/invoices
+/api/v2/invoices
+```
+
+<Info>
+In practice, you'll rarely need more than v1 and v2 running simultaneously. When you ship v2, set a deprecation timeline for v1 (6-12 months), notify consumers, and eventually remove it. If you're versioning more than once a year, your API contracts are changing too fast.
+</Info>
+
+### A consistent response envelope
+
+Every response should follow the same structure. Frontend engineers shouldn't have to guess whether the data is in `response.data`, `response.result`, or `response.invoice`.
+
+```tsx
+// Success response
+interface ApiSuccessResponse<T> {
+  data: T;
+  meta?: PaginationMeta;
+}
+
+// Error response
+interface ApiErrorResponse {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    validationErrors?: Record<string, string[]>;
+  };
+  correlationId: string;
+}
+
+// Examples:
+// GET /api/v1/invoices/123
+{
+  "data": {
+    "id": "123",
+    "invoiceNumber": "INV-001",
+    "status": "SENT",
+    "totalCents": 150000
+  }
+}
+
+// GET /api/v1/invoices?page=1&pageSize=20
+{
+  "data": [
+    { "id": "123", "invoiceNumber": "INV-001" },
+    { "id": "124", "invoiceNumber": "INV-002" }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 147,
+    "totalPages": 8
+  }
+}
+
+// POST /api/v1/invoices with invalid body
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed",
+    "validationErrors": {
+      "lineItems": ["At least one line item is required"],
+      "dueDate": ["Must be a future date"]
+    }
+  },
+  "correlationId": "req_abc123xyz"
+}
+```
+
+## GraphQL: When It's Worth the Complexity
+
+GraphQL solves real problems. It also introduces real complexity. Here's when the trade-off is worth it.
+
+### When to use GraphQL
+
+- **Multiple clients with different data needs.** A mobile app needs a subset of what the web app needs. With REST, you either overfetch on mobile or create multiple endpoints. GraphQL lets each client request exactly what it needs.
+- **Deeply relational data.** If your UI frequently needs to traverse relationships (invoice → client → organization → billing settings), GraphQL's query language is naturally suited for this.
+- **Rapid frontend iteration.** When the frontend team is iterating fast and doesn't want to wait for backend endpoint changes, GraphQL's schema-first approach lets them query what they need without backend changes.
+
+### When NOT to use GraphQL
+
+- **Simple CRUD.** If your API is mostly create/read/update/delete on flat resources, REST is simpler and more appropriate.
+- **File uploads.** GraphQL handles file uploads poorly. You'll end up using REST or presigned URLs alongside your GraphQL API.
+- **Small team, single client.** If one frontend consumes one backend, GraphQL adds overhead with minimal benefit. tRPC is a better fit.
+- **Caching is critical.** HTTP-level caching is straightforward with REST (ETags, Cache-Control). GraphQL requires a dedicated caching layer (Apollo Client, Relay).
+
+### Schema design principles
+
+```graphql
+type Query {
+  invoice(id: ID!): Invoice
+  invoices(filter: InvoiceFilter, pagination: PaginationInput): InvoiceConnection!
+}
+
+type Mutation {
+  createInvoice(input: CreateInvoiceInput!): CreateInvoicePayload!
+  sendInvoice(id: ID!): SendInvoicePayload!
+}
+
+type Invoice {
+  id: ID!
+  invoiceNumber: String!
+  status: InvoiceStatus!
+  client: Client!
+  lineItems: [LineItem!]!
+  subtotalCents: Int!
+  taxCents: Int!
+  totalCents: Int!
+  dueDate: DateTime!
+  createdAt: DateTime!
+}
+
+type CreateInvoicePayload {
+  invoice: Invoice
+  errors: [UserError!]
+}
+
+type UserError {
+  field: String
+  message: String!
+}
+
+input InvoiceFilter {
+  status: [InvoiceStatus!]
+  clientId: ID
+  dueDateAfter: DateTime
+  dueDateBefore: DateTime
+  search: String
+}
+```
+
+Key principles:
+- **Return types for mutations**, not just the entity. `CreateInvoicePayload` contains both the invoice and potential errors. This lets the client handle partial success gracefully.
+- **Connection pattern for lists.** Use `InvoiceConnection` with edges and pageInfo for cursor-based pagination.
+- **Input types for mutations.** Separate `CreateInvoiceInput` from the `Invoice` type. Inputs and outputs have different shapes.
+
+### The N+1 problem
+
+The biggest performance trap in GraphQL. If 20 invoices each resolve their `client` field, you get 20 separate database queries for clients.
+
+```tsx
+// ❌ Naive resolver — N+1 queries
+const resolvers = {
+  Invoice: {
+    client: async (invoice) => {
+      return db.client.findUnique({ where: { id: invoice.clientId } });
+    },
+  },
+};
+
+// ✅ DataLoader — batches N queries into 1
+import DataLoader from 'dataloader';
+
+const clientLoader = new DataLoader(async (clientIds: string[]) => {
+  const clients = await db.client.findMany({
+    where: { id: { in: clientIds } },
+  });
+  const clientMap = new Map(clients.map(c => [c.id, c]));
+  return clientIds.map(id => clientMap.get(id)!);
+});
+
+const resolvers = {
+  Invoice: {
+    client: async (invoice) => {
+      return clientLoader.load(invoice.clientId);
+    },
+  },
+};
+```
+
+DataLoader collects all the `load()` calls within a single tick and batches them into one database query. 20 invoices → 1 client query instead of 20.
+
+<Tip>
+Create a new DataLoader instance per request. DataLoaders cache results for the lifetime of the instance. A per-request instance ensures you don't serve stale data and don't leak data between users.
+</Tip>
+
+## tRPC: The Sweet Spot for Full-Stack TypeScript
+
+I covered tRPC in detail in [The Full-Stack TypeScript Playbook](/dev/fullstack-typescript), but here's the API design perspective.
+
+tRPC occupies a unique niche: it gives you end-to-end type safety without schemas, codegen, or runtime validation overhead. The trade-off is that it only works when both client and server are TypeScript and deployed from the same repo (or share types).
+
+### When tRPC wins
+
+| Scenario | Best Choice |
+|----------|-------------|
+| Single team, single frontend, TypeScript everywhere | tRPC |
+| Multiple frontends with different data needs | GraphQL |
+| Public API for third-party consumers | REST + OpenAPI |
+| Mobile + web clients, different languages | REST + OpenAPI |
+| Internal microservice-to-microservice | REST or gRPC |
+| Rapid prototyping with type safety | tRPC |
+
+### tRPC API design patterns
+
+```tsx
+// Group related procedures into routers
+export const appRouter = t.router({
+  invoice: invoiceRouter,
+  client: clientRouter,
+  payment: paymentRouter,
+  report: reportRouter,
+  user: userRouter,
+});
+
+// Each router is organized by domain
+const invoiceRouter = t.router({
+  list: protectedProcedure
+    .input(InvoiceQuerySchema)
+    .query(/* ... */),
+
+  byId: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(/* ... */),
+
+  create: protectedProcedure
+    .input(CreateInvoiceSchema)
+    .mutation(/* ... */),
+
+  update: protectedProcedure
+    .input(UpdateInvoiceSchema)
+    .mutation(/* ... */),
+
+  send: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(/* ... */),
+
+  markAsPaid: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      paymentDate: z.string().datetime(),
+      paymentMethod: z.enum(['bank_transfer', 'card', 'cash']),
+    }))
+    .mutation(/* ... */),
+});
+```
+
+The naming convention matters. `invoice.list`, `invoice.byId`, `invoice.create` — these read naturally on the client: `trpc.invoice.list.useQuery(...)`. It's self-documenting.
+
+## API Error Contracts
+
+How you handle errors is just as important as how you handle success. A well-designed error contract makes frontend error handling predictable.
+
+### Error taxonomy
+
+```tsx
+// Every error has a machine-readable code and a human-readable message
+type ErrorCode =
+  | 'VALIDATION_ERROR'     // Input validation failed
+  | 'NOT_FOUND'            // Resource doesn't exist
+  | 'CONFLICT'             // Duplicate, version conflict
+  | 'FORBIDDEN'            // Authenticated but not authorized
+  | 'UNAUTHORIZED'         // Not authenticated
+  | 'RATE_LIMITED'         // Too many requests
+  | 'PAYMENT_REQUIRED'     // Plan limit reached
+  | 'SERVICE_UNAVAILABLE'  // Downstream dependency down
+  | 'INTERNAL_ERROR';      // Unhandled server error
+
+interface ApiError {
+  code: ErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+  validationErrors?: Record<string, string[]>;
+  retryable: boolean;
+  retryAfterMs?: number;
+}
+```
+
+The `retryable` field is a game-changer for frontend UX. When the frontend knows an error is retryable, it can show a retry button. When it's not, it shows a different message. No guesswork.
+
+```tsx
+// Frontend error handling based on the contract
+function handleApiError(error: ApiError) {
+  switch (error.code) {
+    case 'VALIDATION_ERROR':
+      return setFormErrors(error.validationErrors);
+    case 'NOT_FOUND':
+      return router.push('/404');
+    case 'UNAUTHORIZED':
+      return router.push('/login');
+    case 'FORBIDDEN':
+      return showToast('You don\'t have permission to do this');
+    case 'RATE_LIMITED':
+      return showToast(`Too many requests. Try again in ${Math.ceil(error.retryAfterMs! / 1000)}s`);
+    case 'CONFLICT':
+      return showToast('This resource was modified by someone else. Please refresh.');
+    default:
+      return showToast(error.retryable ? 'Something went wrong. Please try again.' : 'Something went wrong.');
+  }
+}
+```
+
+## Authentication Patterns
+
+### JWT (stateless)
+
+Best for: microservices, serverless, when you can't share session state.
+
+```tsx
+// Middleware: validate JWT on every request
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    throw new UnauthorizedError('Missing authorization header');
+  }
+
+  const token = header.slice(7);
+  try {
+    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      orgId: payload.orgId,
+      role: payload.role,
+    };
+    next();
+  } catch {
+    throw new UnauthorizedError('Invalid or expired token');
+  }
+}
+```
+
+### Session-based
+
+Best for: monolithic apps, when you control the deployment, when you need instant session invalidation.
+
+```tsx
+// Session with Redis store
+import session from 'express-session';
+import RedisStore from 'connect-redis';
+import { createClient } from 'redis';
+
+const redisClient = createClient({ url: env.REDIS_URL });
+
+app.use(session({
+  store: new RedisStore({ client: redisClient }),
+  secret: env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000,
+  },
+}));
+```
+
+### API keys
+
+Best for: service-to-service auth, third-party integrations, webhooks.
+
+```tsx
+export async function apiKeyAuth(req: Request, res: Response, next: NextFunction) {
+  const apiKey = req.headers['x-api-key'] as string;
+  if (!apiKey) throw new UnauthorizedError('Missing API key');
+
+  const hashedKey = crypto.createHash('sha256').update(apiKey).digest('hex');
+  const keyRecord = await db.apiKey.findUnique({
+    where: { hashedKey },
+    include: { organization: true },
+  });
+
+  if (!keyRecord || keyRecord.revokedAt) {
+    throw new UnauthorizedError('Invalid API key');
+  }
+
+  if (keyRecord.expiresAt && keyRecord.expiresAt < new Date()) {
+    throw new UnauthorizedError('API key expired');
+  }
+
+  await db.apiKey.update({
+    where: { id: keyRecord.id },
+    data: { lastUsedAt: new Date() },
+  });
+
+  req.apiKeyContext = {
+    organizationId: keyRecord.organizationId,
+    scopes: keyRecord.scopes,
+  };
+
+  next();
+}
+```
+
+<Info>
+Never store API keys in plain text. Hash them with SHA-256 and store the hash. When a key is presented, hash it and compare. This way, even if your database is compromised, the raw keys aren't exposed. Show the full key only once at creation time.
+</Info>
+
+## Rate Limiting
+
+Every API needs rate limiting. Even internal APIs. It protects against accidental infinite loops as much as intentional abuse.
+
+```tsx
+import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+
+const standardLimiter = rateLimit({
+  store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) }),
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.orgId ?? req.ip,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Too many requests',
+        retryable: true,
+        retryAfterMs: res.getHeader('Retry-After') as number * 1000,
+      },
+    });
+  },
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.orgId ?? req.ip,
+});
+
+// Apply different limits to different routes
+app.use('/api/v1/', standardLimiter);
+app.use('/api/v1/invoices', standardLimiter);
+app.use('/api/v1/auth/login', strictLimiter);
+app.use('/api/v1/auth/forgot-password', strictLimiter);
+```
+
+## API Documentation
+
+If your API isn't documented, it doesn't exist. For REST APIs, OpenAPI (Swagger) is the standard. The best approach is schema-first: define the spec, generate the code.
+
+For NestJS, use the `@nestjs/swagger` decorators to generate the spec from code:
+
+```tsx
+@ApiTags('invoices')
+@Controller('api/v1/invoices')
+export class InvoicesController {
+  @Get()
+  @ApiOperation({ summary: 'List invoices for the current organization' })
+  @ApiQuery({ name: 'status', enum: InvoiceStatus, required: false, isArray: true })
+  @ApiQuery({ name: 'page', type: Number, required: false })
+  @ApiQuery({ name: 'pageSize', type: Number, required: false })
+  @ApiResponse({ status: 200, type: PaginatedInvoiceResponse })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async list(@Query() query: InvoiceQueryDto, @CurrentUser() user: AuthUser) {
+    return this.invoicesService.findByOrg(user.orgId, query);
+  }
+}
+```
+
+For tRPC, the documentation is the TypeScript types themselves. The client has full autocomplete and inline documentation. For external consumers, you can generate an OpenAPI spec from tRPC using `trpc-openapi`.
+
+## API Evolution Without Breaking Clients
+
+The real test of API design is how it ages. APIs should be easy to evolve without breaking existing clients.
+
+### Additive changes are safe
+
+Adding new fields, new endpoints, new query parameters, and new enum values is always safe. Existing clients ignore what they don't know about.
+
+### Breaking changes require versioning
+
+Removing fields, renaming fields, changing field types, and changing response structures are breaking changes. Handle them with API versioning and deprecation periods.
+
+```tsx
+// v1: returns amount in dollars (the original bad decision)
+GET /api/v1/invoices/123
+{ "data": { "amount": 1500.00 } }
+
+// v2: returns amount in cents (the correction)
+GET /api/v2/invoices/123
+{ "data": { "amountCents": 150000, "currency": "AUD" } }
+
+// v1 continues to work for existing clients
+// v1 response includes a deprecation header
+res.setHeader('Deprecation', 'true');
+res.setHeader('Sunset', 'Sat, 01 Mar 2025 00:00:00 GMT');
+res.setHeader('Link', '</api/v2/invoices>; rel="successor-version"');
+```
+
+<Tip>
+When designing a new API, model money as integers (cents) from day one. `150000` cents is unambiguous. `1500.00` dollars invites floating-point issues, currency confusion, and eventually a breaking API change to fix it. I learned this the hard way.
+</Tip>
+
+## The Decision Framework
+
+When someone asks me "should we use REST, GraphQL, or tRPC?", here's how I think about it:
+
+| Question | REST | GraphQL | tRPC |
+|----------|------|---------|------|
+| Public API? | Yes | Maybe | No |
+| Multiple client languages? | Yes | Yes | No |
+| Need HTTP caching? | Yes | Hard | Hard |
+| Complex relational queries? | Workarounds | Yes | Depends |
+| Single TypeScript team? | Works | Overkill | Yes |
+| Type safety without codegen? | No | No | Yes |
+| Tooling maturity? | Excellent | Good | Growing |
+| Learning curve? | Low | Medium | Low |
+
+For most product-focused teams I work with — building SaaS with Next.js frontends and TypeScript backends — tRPC for the primary frontend + REST/OpenAPI for external integrations is the sweet spot. You get instant type safety for internal development and industry-standard APIs for everything external.
+
+The worst API isn't the one that chose the wrong paradigm. It's the one that's inconsistent. Pick a style, document it, enforce it, and be consistent. That matters more than anything else I've written here.

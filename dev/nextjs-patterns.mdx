@@ -1,0 +1,584 @@
+---
+title: "Next.js Patterns That Survive Production"
+description: "App Router, server actions, RSC data fetching, caching strategies, and the patterns I use to ship Next.js apps that don't crumble at scale."
+---
+
+# Next.js Patterns That Survive Production
+
+I've shipped Next.js applications at Weel and MetaLabs that handle real traffic, real money, and real angry users when things break. The gap between a Next.js tutorial and a Next.js production app is enormous — and it's not about the framework features. It's about the patterns you choose, the traps you avoid, and the mental models you carry.
+
+This isn't a tutorial. If you want to learn what the App Router is, the docs are excellent. This is the field guide I wish I'd had — the patterns that survived contact with production and the anti-patterns that nearly took us down.
+
+## The App Router Mental Model
+
+The App Router is a filesystem-based router where **every folder is a route segment** and **every file has a specific role**. The roles matter more than the folders:
+
+| File | Purpose | Renders On |
+|------|---------|------------|
+| `page.tsx` | Route UI | Server (default) |
+| `layout.tsx` | Shared UI that persists across navigations | Server (default) |
+| `loading.tsx` | Instant loading UI via Suspense | Server |
+| `error.tsx` | Error boundary for the segment | Client (`'use client'` required) |
+| `not-found.tsx` | 404 UI for the segment | Server |
+| `route.tsx` | API endpoint (no UI) | Server |
+| `template.tsx` | Like layout, but re-renders on navigation | Server (default) |
+
+The mental model shift that matters: **layouts are persistent**. When you navigate from `/dashboard/invoices` to `/dashboard/settings`, the `dashboard/layout.tsx` doesn't re-render. Its state survives. This is powerful for things like sidebar navigation and persistent filters — but it also means you can't rely on layout mount/unmount for data fetching side effects.
+
+```tsx
+// app/dashboard/layout.tsx
+export default function DashboardLayout({
+  children,
+  analytics,
+}: {
+  children: React.ReactNode;
+  analytics: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-screen">
+      <DashboardSidebar />
+      <main className="flex-1 overflow-auto">
+        {children}
+      </main>
+      <aside className="w-80 border-l">
+        {analytics}
+      </aside>
+    </div>
+  );
+}
+```
+
+<Info>
+If you need a layout that re-renders on every navigation (rare), use `template.tsx` instead. It has the same API as `layout.tsx` but creates a new instance on every navigation. I use this for analytics page-view tracking wrappers.
+</Info>
+
+## Server Components vs Client Components: The Decision Framework
+
+I covered RSC in depth on a [separate page](/dev/react-server-components), but the production decision framework is worth repeating in the context of Next.js patterns.
+
+The rule is simple: **everything is a server component until it can't be**. Push the `'use client'` boundary as far down the tree as possible.
+
+```
+❌ Wrong: Making the whole page a client component because one button needs onClick
+
+// app/invoices/page.tsx
+'use client'; // Don't do this
+
+❌ Wrong: Making a container client because a child needs state
+
+// InvoiceList.tsx
+'use client'; // Don't do this just because InvoiceRow has a checkbox
+
+✅ Right: Only the interactive leaf is a client component
+
+// InvoiceList.tsx (server component)
+// InvoiceCheckbox.tsx ('use client')
+```
+
+In practice, I structure pages like this:
+
+```tsx
+// app/invoices/page.tsx — server component, does data fetching
+import { InvoiceTable } from '@/components/invoices/InvoiceTable';
+import { InvoiceFilters } from '@/components/invoices/InvoiceFilters';
+import { getInvoices } from '@/lib/invoices';
+
+export default async function InvoicesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; page?: string }>;
+}) {
+  const params = await searchParams;
+  const { invoices, totalCount } = await getInvoices({
+    status: params.status,
+    page: Number(params.page) || 1,
+  });
+
+  return (
+    <div>
+      <h1>Invoices</h1>
+      <InvoiceFilters currentStatus={params.status} />
+      <InvoiceTable invoices={invoices} totalCount={totalCount} />
+    </div>
+  );
+}
+```
+
+```tsx
+// components/invoices/InvoiceFilters.tsx
+'use client';
+
+import { useRouter, useSearchParams } from 'next/navigation';
+
+export function InvoiceFilters({ currentStatus }: { currentStatus?: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  function setFilter(status: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('status', status);
+    params.delete('page');
+    router.push(`?${params.toString()}`);
+  }
+
+  return (
+    <div className="flex gap-2">
+      {['all', 'draft', 'sent', 'paid', 'overdue'].map((status) => (
+        <button
+          key={status}
+          onClick={() => setFilter(status)}
+          className={currentStatus === status ? 'bg-blue-600 text-white' : ''}
+        >
+          {status}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+The key insight: the page itself is a server component that fetches data. The filters are a thin client component that manipulates the URL. When the URL changes, Next.js re-renders the server component with new `searchParams`. The data fetching stays on the server. The interactivity stays on the client. Clean separation.
+
+## Server Actions: Patterns and Anti-Patterns
+
+Server actions are functions that run on the server but can be called from client components. They're the bridge between client interactivity and server-side mutations.
+
+### The pattern I use
+
+```tsx
+// lib/actions/invoices.ts
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { z } from 'zod';
+import { auth } from '@/lib/auth';
+import { db } from '@/lib/db';
+
+const CreateInvoiceSchema = z.object({
+  clientId: z.string().uuid(),
+  lineItems: z.array(z.object({
+    description: z.string().min(1),
+    quantity: z.number().positive(),
+    unitPrice: z.number().positive(),
+  })).min(1),
+  dueDate: z.string().datetime(),
+});
+
+export async function createInvoice(formData: FormData) {
+  const session = await auth();
+  if (!session?.user) throw new Error('Unauthorized');
+
+  const raw = Object.fromEntries(formData);
+  const parsed = CreateInvoiceSchema.safeParse({
+    clientId: raw.clientId,
+    lineItems: JSON.parse(raw.lineItems as string),
+    dueDate: raw.dueDate,
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.flatten() };
+  }
+
+  const invoice = await db.invoice.create({
+    data: {
+      ...parsed.data,
+      organizationId: session.user.organizationId,
+      status: 'draft',
+    },
+  });
+
+  revalidatePath('/invoices');
+  redirect(`/invoices/${invoice.id}`);
+}
+```
+
+### Anti-patterns I've seen in production
+
+**Anti-pattern 1: Fat server actions.** A server action that does 15 things — validates, creates records in 4 tables, sends emails, triggers webhooks, updates caches. Server actions should be thin wrappers that delegate to service layer functions.
+
+```tsx
+// ❌ Don't do this
+export async function createInvoice(formData: FormData) {
+  // 100 lines of business logic directly in the action
+}
+
+// ✅ Do this
+export async function createInvoice(formData: FormData) {
+  const session = await auth();
+  const parsed = CreateInvoiceSchema.safeParse(/* ... */);
+  if (!parsed.success) return { error: parsed.error.flatten() };
+
+  const result = await invoiceService.create(parsed.data, session.user);
+  revalidatePath('/invoices');
+  redirect(`/invoices/${result.id}`);
+}
+```
+
+**Anti-pattern 2: Using server actions for reads.** Server actions are for mutations. For reads, use server components or route handlers. Server actions go through a POST request under the hood — semantically wrong for reads, and it bypasses the caching layer.
+
+**Anti-pattern 3: No validation.** Server actions receive raw input from the client. Always validate with Zod. Always authenticate. Never trust the input.
+
+<Warning>
+Server actions are publicly accessible endpoints. Even though they look like function calls, the client sends a POST request to your server. If you don't validate and authenticate inside the action, you have an open mutation endpoint. Treat every server action like a public API endpoint.
+</Warning>
+
+## Caching: The Four Layers Demystified
+
+Next.js caching is the most misunderstood part of the framework. There are four distinct caches, and they interact in non-obvious ways.
+
+### 1. Request Memoization
+
+When you call the same `fetch()` with the same URL and options multiple times during a single server render, Next.js deduplicates them. This is per-request — it doesn't persist across different user requests.
+
+```tsx
+// Both of these result in ONE actual fetch call during a single render
+async function ProductPage({ id }: { id: string }) {
+  const product = await getProduct(id); // fetch #1
+  return <ProductDetails product={product} />;
+}
+
+async function ProductDetails({ product }: { product: Product }) {
+  const product = await getProduct(product.id); // fetch #2 — deduplicated!
+  return <div>{product.name}</div>;
+}
+```
+
+This is why you can call the same data function in multiple server components without worrying about redundant requests. The framework handles it.
+
+### 2. Data Cache
+
+The `fetch()` API in Next.js is extended with caching. By default, fetch results are cached indefinitely in the data cache (unless you opt out).
+
+```tsx
+// Cached indefinitely (default)
+const res = await fetch('https://api.example.com/products');
+
+// Revalidate every 60 seconds
+const res = await fetch('https://api.example.com/products', {
+  next: { revalidate: 60 },
+});
+
+// Never cache (opt out)
+const res = await fetch('https://api.example.com/products', {
+  cache: 'no-store',
+});
+```
+
+For non-fetch data sources (like Prisma queries), use `unstable_cache`:
+
+```tsx
+import { unstable_cache } from 'next/cache';
+
+const getCachedInvoices = unstable_cache(
+  async (orgId: string) => {
+    return db.invoice.findMany({
+      where: { organizationId: orgId },
+      orderBy: { createdAt: 'desc' },
+    });
+  },
+  ['invoices'],
+  { revalidate: 60, tags: ['invoices'] }
+);
+```
+
+### 3. Full Route Cache
+
+At build time (or on first request for dynamic routes), Next.js renders the route and caches the HTML and RSC payload. Subsequent requests serve the cached version. This is the production cache that catches people off guard.
+
+Static routes are fully cached. Dynamic routes (those using `cookies()`, `headers()`, `searchParams`, or uncached data fetching) opt out of the full route cache automatically.
+
+### 4. Router Cache (Client-side)
+
+The client maintains an in-memory cache of visited route segments. When you navigate back to a previously visited page, it loads instantly from this cache. This cache has different durations:
+
+- **Dynamic pages:** 30 seconds
+- **Static pages:** 5 minutes
+
+<Tip>
+The router cache is the one that causes the most "why isn't my data updating?" confusion. After a server action, call `revalidatePath()` or `revalidateTag()` to bust the relevant server-side caches. On the client, `router.refresh()` clears the router cache for the current route.
+</Tip>
+
+### My caching decision framework
+
+| Scenario | Strategy |
+|----------|----------|
+| Marketing pages, blog posts | Static (ISG) — `revalidate: 3600` |
+| Dashboard data | Dynamic — `cache: 'no-store'` or short revalidation |
+| User-specific content | Dynamic — `cookies()` opts out of caching |
+| Shared reference data (countries, categories) | `unstable_cache` with long TTL and tag-based revalidation |
+| Search results | Dynamic with `searchParams` |
+| E-commerce product pages | ISR — `revalidate: 60` with on-demand revalidation via webhook |
+
+## ISR vs SSR vs SSG: The Decision Framework
+
+This decision shouldn't be made at the app level — it should be made per route.
+
+**SSG (Static Site Generation):** Content known at build time, changes rarely. Marketing pages, documentation, blog posts. Zero server cost per request.
+
+**ISR (Incremental Static Regeneration):** Content that changes, but staleness is acceptable. Product pages, listing pages, public profiles. Set `revalidate` to an acceptable staleness window.
+
+**SSR (Server-Side Rendering):** Content that must be fresh on every request, or is user-specific. Dashboards, authenticated pages, search results. Use `dynamic = 'force-dynamic'` or access dynamic functions.
+
+```tsx
+// SSG — fully static, built at build time
+export default function AboutPage() {
+  return <div>About us</div>;
+}
+
+// ISR — rebuilt every 60 seconds on demand
+export const revalidate = 60;
+export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const product = await getProduct(id);
+  return <ProductDetails product={product} />;
+}
+
+// SSR — fresh on every request
+export const dynamic = 'force-dynamic';
+export default async function DashboardPage() {
+  const session = await auth();
+  const data = await getDashboardData(session.user.orgId);
+  return <Dashboard data={data} />;
+}
+```
+
+## Middleware Patterns
+
+Middleware runs before every request. It's the gatekeeper. I use it for three things: authentication redirects, geographic routing, and feature flags.
+
+```tsx
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getToken } from 'next-auth/jwt';
+
+const publicPaths = ['/login', '/signup', '/forgot-password', '/api/webhooks'];
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (publicPaths.some(p => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
+  const token = await getToken({ req: request });
+  if (!token) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('callbackUrl', pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const response = NextResponse.next();
+  response.headers.set('x-user-id', token.sub!);
+  response.headers.set('x-org-id', token.orgId as string);
+
+  return response;
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|public).*)'],
+};
+```
+
+<Warning>
+Keep middleware fast. It runs on every matched request, including static assets if your matcher isn't specific enough. Don't do database queries in middleware. Don't do heavy computation. Read a JWT, check a cookie, set a header — that's it.
+</Warning>
+
+## Parallel Routes and Intercepting Routes
+
+These are the power features that most teams underuse.
+
+### Parallel routes
+
+Parallel routes let you render multiple pages simultaneously in the same layout. I use them for dashboard layouts where the main content and a sidebar panel are independently navigable.
+
+```
+app/
+  dashboard/
+    layout.tsx          ← receives {children, analytics, notifications}
+    page.tsx            ← default main content
+    @analytics/
+      page.tsx          ← analytics panel
+      loading.tsx       ← independent loading state
+    @notifications/
+      page.tsx          ← notifications panel
+```
+
+```tsx
+// app/dashboard/layout.tsx
+export default function DashboardLayout({
+  children,
+  analytics,
+  notifications,
+}: {
+  children: React.ReactNode;
+  analytics: React.ReactNode;
+  notifications: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <div className="col-span-8">{children}</div>
+      <div className="col-span-2">{analytics}</div>
+      <div className="col-span-2">{notifications}</div>
+    </div>
+  );
+}
+```
+
+Each parallel route has its own loading and error states. If analytics fails, the rest of the dashboard still renders. This is genuine resilience, not just a nice API.
+
+### Intercepting routes
+
+Intercepting routes let you "intercept" a navigation and show a different UI — typically a modal — while preserving the URL. The classic example is photo galleries: click a photo, a modal opens with the photo. Refresh the page, you get the full photo page.
+
+```
+app/
+  invoices/
+    page.tsx            ← invoice list
+    [id]/
+      page.tsx          ← full invoice page (direct navigation or refresh)
+    (.)([id])/
+      page.tsx          ← intercepted: shows invoice in a modal
+```
+
+I use this pattern for preview modals in list views. Users can click an invoice to see a quick preview (modal), then either close it or click through to the full page. The URL updates immediately, so sharing the link always works.
+
+## Error Boundaries and Loading States
+
+Every route segment should have error and loading handling. Not as an afterthought — as a default.
+
+```tsx
+// app/invoices/loading.tsx
+export default function InvoicesLoading() {
+  return (
+    <div className="space-y-4">
+      <div className="h-8 w-48 animate-pulse rounded bg-gray-200" />
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="h-16 animate-pulse rounded bg-gray-100" />
+      ))}
+    </div>
+  );
+}
+```
+
+```tsx
+// app/invoices/error.tsx
+'use client';
+
+export default function InvoicesError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-6">
+      <h2 className="text-lg font-semibold text-red-800">
+        Failed to load invoices
+      </h2>
+      <p className="mt-2 text-red-600">
+        {error.message || 'An unexpected error occurred.'}
+      </p>
+      <button
+        onClick={reset}
+        className="mt-4 rounded bg-red-600 px-4 py-2 text-white"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+```
+
+<Tip>
+The `reset` function in error boundaries re-renders the route segment, which re-triggers server component data fetching. It's a genuine retry mechanism, not just a UI trick. Pair it with exponential backoff on the server side for resilient data fetching.
+</Tip>
+
+## Streaming with Suspense
+
+Streaming lets you send parts of the page as they're ready, rather than waiting for all data to resolve before sending anything. This is the killer feature of the App Router for data-heavy pages.
+
+```tsx
+import { Suspense } from 'react';
+
+export default function DashboardPage() {
+  return (
+    <div className="space-y-6">
+      <h1>Dashboard</h1>
+      <Suspense fallback={<MetricsSkeleton />}>
+        <DashboardMetrics />
+      </Suspense>
+      <Suspense fallback={<ChartSkeleton />}>
+        <RevenueChart />
+      </Suspense>
+      <Suspense fallback={<TableSkeleton />}>
+        <RecentTransactions />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+Each `Suspense` boundary streams independently. If `DashboardMetrics` resolves in 50ms but `RecentTransactions` takes 2 seconds, the user sees the metrics immediately. The page is progressively revealed.
+
+The pattern I follow: **one Suspense boundary per independent data dependency**. Don't wrap the entire page in one Suspense — that defeats the purpose. Don't wrap every component either — that creates visual thrash. Group by what the user perceives as a logical unit.
+
+## Patterns I've Learned the Hard Way
+
+**Always validate `searchParams` and `params`.** They come from the URL. They're user input. Treat them like form data.
+
+```tsx
+import { z } from 'zod';
+
+const InvoiceSearchParams = z.object({
+  status: z.enum(['all', 'draft', 'sent', 'paid', 'overdue']).default('all'),
+  page: z.coerce.number().int().positive().default(1),
+  sort: z.enum(['date', 'amount', 'client']).default('date'),
+});
+
+export default async function InvoicesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[]>>;
+}) {
+  const raw = await searchParams;
+  const params = InvoiceSearchParams.parse(raw);
+  // Now params is fully typed and validated
+}
+```
+
+**Use `notFound()` aggressively.** If a database query returns null for a route parameter, call `notFound()` immediately. Don't render an empty state for what is semantically a missing resource.
+
+```tsx
+import { notFound } from 'next/navigation';
+
+export default async function InvoicePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const invoice = await getInvoice(id);
+  if (!invoice) notFound();
+
+  return <InvoiceDetails invoice={invoice} />;
+}
+```
+
+**Colocate data fetching with the component that uses it.** Don't fetch everything in the page and drill props. Let each server component fetch its own data. Request memoization prevents duplicate requests.
+
+**Be intentional about route segment config.** Every page should explicitly declare its rendering strategy, not rely on implicit detection.
+
+```tsx
+// Be explicit
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// or
+export const revalidate = 60;
+
+// Don't leave it ambiguous
+```
+
+These patterns aren't clever. They're the boring, reliable foundations that keep Next.js applications running smoothly in production. The framework gives you powerful primitives — the craft is in knowing when and how to combine them.

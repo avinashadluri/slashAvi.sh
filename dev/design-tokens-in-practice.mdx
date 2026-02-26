@@ -1,0 +1,653 @@
+---
+title: "Design Tokens in Practice"
+description: "How to implement design tokens that bridge design and engineering — from Figma variables to CSS custom properties to TypeScript constants."
+---
+
+# Design Tokens in Practice
+
+Design tokens are the most misunderstood concept in design systems. I've watched teams spend months building token infrastructure that nobody uses, and I've seen teams with a simple JSON file and a build script achieve better consistency than teams with enterprise-grade tooling. The difference isn't the tools — it's whether you understand what tokens actually are, how they flow through a system, and where the real value lives.
+
+I built token systems at Atlassian (where tokens serve thousands of engineers across dozens of products) and at Weel (where a lean token system supports a fast-moving product team). These are very different scales with very different constraints, but the core patterns are the same.
+
+## What Design Tokens Actually Are (and Aren't)
+
+A design token is **a named design decision**. That's it. Not a CSS variable. Not a JavaScript constant. Not a Figma style. Those are all *implementations* of a token. The token itself is the decision: "our primary brand color is this specific blue" or "the spacing between form fields is 16px."
+
+```json
+{
+  "color": {
+    "brand": {
+      "primary": { "$value": "#2563EB", "$type": "color" }
+    }
+  },
+  "spacing": {
+    "form-gap": { "$value": "16px", "$type": "dimension" }
+  }
+}
+```
+
+What tokens are NOT:
+
+- **Not one-to-one mappings of CSS properties.** `border-top-left-radius` doesn't need its own token. `border-radius-small` and `border-radius-large` are tokens because they represent design decisions.
+- **Not an abstraction of every possible value.** If a component uses `margin-left: 3px` for a very specific optical alignment, that's not a token. That's a component implementation detail.
+- **Not a replacement for design judgment.** Tokens encode the system's constraints. Designers and engineers still make decisions within those constraints.
+
+<Info>
+The W3C Design Tokens Community Group has published a [specification](https://design-tokens.github.io/community-group/format/) for a standard token format (DTCG). It uses `$value` and `$type` properties. If you're starting from scratch, follow this format — tooling is converging on it.
+</Info>
+
+## Token Taxonomy: Primitive, Semantic, Component
+
+The taxonomy is what separates a useful token system from a pile of named colors. There are three layers, and each serves a different purpose.
+
+### Primitive tokens (also called "global" or "reference")
+
+Raw design values with no implied usage. These are the palette.
+
+```json
+{
+  "color": {
+    "blue": {
+      "50": { "$value": "#EFF6FF" },
+      "100": { "$value": "#DBEAFE" },
+      "200": { "$value": "#BFDBFE" },
+      "500": { "$value": "#3B82F6" },
+      "600": { "$value": "#2563EB" },
+      "700": { "$value": "#1D4ED8" },
+      "900": { "$value": "#1E3A8A" }
+    },
+    "neutral": {
+      "0": { "$value": "#FFFFFF" },
+      "50": { "$value": "#F9FAFB" },
+      "100": { "$value": "#F3F4F6" },
+      "200": { "$value": "#E5E7EB" },
+      "700": { "$value": "#374151" },
+      "800": { "$value": "#1F2937" },
+      "900": { "$value": "#111827" },
+      "1000": { "$value": "#000000" }
+    }
+  },
+  "spacing": {
+    "0": { "$value": "0px" },
+    "1": { "$value": "4px" },
+    "2": { "$value": "8px" },
+    "3": { "$value": "12px" },
+    "4": { "$value": "16px" },
+    "6": { "$value": "24px" },
+    "8": { "$value": "32px" },
+    "12": { "$value": "48px" },
+    "16": { "$value": "64px" }
+  }
+}
+```
+
+### Semantic tokens (also called "alias" or "purpose")
+
+Named by purpose, referencing primitive tokens. These encode design intent.
+
+```json
+{
+  "color": {
+    "text": {
+      "primary": { "$value": "{color.neutral.900}" },
+      "secondary": { "$value": "{color.neutral.700}" },
+      "disabled": { "$value": "{color.neutral.200}" },
+      "inverse": { "$value": "{color.neutral.0}" },
+      "brand": { "$value": "{color.blue.600}" },
+      "danger": { "$value": "{color.red.600}" },
+      "success": { "$value": "{color.green.600}" }
+    },
+    "background": {
+      "default": { "$value": "{color.neutral.0}" },
+      "subtle": { "$value": "{color.neutral.50}" },
+      "muted": { "$value": "{color.neutral.100}" },
+      "inverse": { "$value": "{color.neutral.900}" },
+      "brand": { "$value": "{color.blue.600}" },
+      "danger": { "$value": "{color.red.50}" },
+      "success": { "$value": "{color.green.50}" }
+    },
+    "border": {
+      "default": { "$value": "{color.neutral.200}" },
+      "strong": { "$value": "{color.neutral.700}" },
+      "brand": { "$value": "{color.blue.600}" },
+      "danger": { "$value": "{color.red.600}" }
+    }
+  },
+  "spacing": {
+    "inline": {
+      "xs": { "$value": "{spacing.1}" },
+      "sm": { "$value": "{spacing.2}" },
+      "md": { "$value": "{spacing.4}" },
+      "lg": { "$value": "{spacing.6}" },
+      "xl": { "$value": "{spacing.8}" }
+    },
+    "stack": {
+      "xs": { "$value": "{spacing.2}" },
+      "sm": { "$value": "{spacing.3}" },
+      "md": { "$value": "{spacing.4}" },
+      "lg": { "$value": "{spacing.8}" },
+      "xl": { "$value": "{spacing.12}" }
+    }
+  }
+}
+```
+
+### Component tokens
+
+Tokens scoped to a specific component. These are optional — most teams don't need them until they reach a certain scale.
+
+```json
+{
+  "button": {
+    "primary": {
+      "background": { "$value": "{color.background.brand}" },
+      "text": { "$value": "{color.text.inverse}" },
+      "border": { "$value": "transparent" },
+      "background-hover": { "$value": "{color.blue.700}" },
+      "background-active": { "$value": "{color.blue.800}" }
+    },
+    "secondary": {
+      "background": { "$value": "transparent" },
+      "text": { "$value": "{color.text.brand}" },
+      "border": { "$value": "{color.border.brand}" },
+      "background-hover": { "$value": "{color.blue.50}" }
+    },
+    "padding-x": { "$value": "{spacing.inline.md}" },
+    "padding-y": { "$value": "{spacing.inline.sm}" },
+    "border-radius": { "$value": "{border-radius.md}" }
+  }
+}
+```
+
+<Tip>
+Start with primitive and semantic tokens. Only add component tokens when you have a multi-platform design system (web + mobile + email) where the same component needs different token mappings per platform. For a web-only system, semantic tokens are usually sufficient.
+</Tip>
+
+## Figma Variables to Tokens Pipeline
+
+The dream: designers update a color in Figma, it flows through to production code automatically. The reality: it takes some setup, but it's achievable.
+
+### Step 1: Figma Variables
+
+Figma's native Variables feature supports the primitive → semantic → component taxonomy. Set up your Figma library with:
+
+- A **Primitives** collection: raw color palette, spacing scale, radius scale
+- A **Semantic** collection: purpose-based aliases that reference primitives
+- **Modes** for light/dark themes (Figma Variables support this natively)
+
+### Step 2: Export from Figma
+
+Use the Figma Variables REST API or a plugin like **Tokens Studio** to export variables as JSON in the DTCG format. I prefer the REST API in CI:
+
+```tsx
+// scripts/sync-tokens.ts
+import { FigmaApi } from '@figma/rest-api-spec';
+
+async function syncTokens() {
+  const api = new FigmaApi({ accessToken: process.env.FIGMA_TOKEN! });
+
+  const variables = await api.getLocalVariables(process.env.FIGMA_FILE_KEY!);
+
+  const tokens = transformToW3CFormat(variables);
+
+  await fs.writeFile(
+    'tokens/figma-export.json',
+    JSON.stringify(tokens, null, 2),
+  );
+
+  console.log(`Synced ${Object.keys(tokens).length} token collections`);
+}
+```
+
+### Step 3: Transform with Style Dictionary
+
+Style Dictionary takes your token JSON and generates platform-specific outputs: CSS custom properties, SCSS variables, TypeScript constants, iOS/Android resources.
+
+```tsx
+// style-dictionary.config.ts
+import StyleDictionary from 'style-dictionary';
+
+export default {
+  source: ['tokens/**/*.json'],
+  platforms: {
+    css: {
+      transformGroup: 'css',
+      buildPath: 'dist/css/',
+      files: [
+        {
+          destination: 'tokens.css',
+          format: 'css/variables',
+          options: { outputReferences: true },
+        },
+      ],
+    },
+    ts: {
+      transformGroup: 'js',
+      buildPath: 'dist/ts/',
+      files: [
+        {
+          destination: 'tokens.ts',
+          format: 'javascript/es6',
+        },
+        {
+          destination: 'tokens.d.ts',
+          format: 'typescript/es6-declarations',
+        },
+      ],
+    },
+    tailwind: {
+      transformGroup: 'js',
+      buildPath: 'dist/tailwind/',
+      files: [
+        {
+          destination: 'tailwind-tokens.js',
+          format: 'javascript/module',
+          filter: (token) => token.attributes?.category === 'color' ||
+                             token.attributes?.category === 'spacing',
+        },
+      ],
+    },
+  },
+};
+```
+
+The output looks like this:
+
+```css
+/* dist/css/tokens.css */
+:root {
+  --color-text-primary: #111827;
+  --color-text-secondary: #374151;
+  --color-text-brand: #2563EB;
+  --color-background-default: #FFFFFF;
+  --color-background-subtle: #F9FAFB;
+  --color-border-default: #E5E7EB;
+  --spacing-inline-sm: 8px;
+  --spacing-inline-md: 16px;
+  --spacing-stack-md: 16px;
+  --spacing-stack-lg: 32px;
+}
+```
+
+```tsx
+// dist/ts/tokens.ts
+export const ColorTextPrimary = '#111827';
+export const ColorTextSecondary = '#374151';
+export const ColorTextBrand = '#2563EB';
+export const SpacingInlineSm = '8px';
+export const SpacingInlineMd = '16px';
+```
+
+## CSS Custom Properties vs JS Tokens
+
+This is one of the most debated topics in design token implementation. My position: **use CSS custom properties as the primary delivery mechanism, with JS tokens for edge cases**.
+
+### Why CSS custom properties win
+
+1. **Theming is trivial.** Swap a class on the root element, all tokens update.
+2. **No runtime cost.** CSS custom properties are resolved by the browser's style engine.
+3. **DevTools friendly.** You can inspect and modify tokens live.
+4. **Work everywhere.** Any CSS-based approach (vanilla CSS, Tailwind, styled-components, CSS Modules) can consume them.
+
+```css
+/* Light theme (default) */
+:root {
+  --color-text-primary: #111827;
+  --color-background-default: #FFFFFF;
+  --color-background-subtle: #F9FAFB;
+  --color-border-default: #E5E7EB;
+}
+
+/* Dark theme */
+[data-theme='dark'] {
+  --color-text-primary: #F9FAFB;
+  --color-background-default: #111827;
+  --color-background-subtle: #1F2937;
+  --color-border-default: #374151;
+}
+```
+
+```tsx
+// Consuming in React — works with any styling approach
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        backgroundColor: 'var(--color-background-subtle)',
+        border: '1px solid var(--color-border-default)',
+        padding: 'var(--spacing-stack-md)',
+        borderRadius: 'var(--border-radius-md)',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+### When to use JS tokens
+
+- **Conditional logic.** When you need to compute a value based on a token: `if (someCondition) { color = tokens.colorDanger; }`.
+- **Canvas/SVG rendering.** Canvas API and inline SVG attributes need raw values, not CSS variable references.
+- **Animation libraries.** Framer Motion, GSAP, etc. need resolved values for animations.
+- **Server-side rendering of emails.** Email clients don't support CSS custom properties.
+
+```tsx
+// JS tokens for a chart library
+import { tokens } from '@repo/tokens';
+
+const chartConfig = {
+  colors: [
+    tokens.color.brand.primary,
+    tokens.color.chart.secondary,
+    tokens.color.chart.tertiary,
+  ],
+  gridColor: tokens.color.border.default,
+  fontSize: parseInt(tokens.typography.size.sm),
+};
+```
+
+## Theming with Tokens
+
+Light and dark mode are table stakes. The real power is arbitrary theming — brand variants, high contrast, user preferences.
+
+### The architecture
+
+```
+tokens/
+  primitives/
+    colors.json         # Full color palette
+    spacing.json
+    typography.json
+  themes/
+    light.json          # Semantic tokens for light theme
+    dark.json           # Semantic tokens for dark theme
+    high-contrast.json  # High contrast for accessibility
+```
+
+Each theme file maps semantic tokens to different primitive values:
+
+```json
+// themes/dark.json
+{
+  "color": {
+    "text": {
+      "primary": { "$value": "{color.neutral.50}" },
+      "secondary": { "$value": "{color.neutral.200}" },
+      "brand": { "$value": "{color.blue.400}" }
+    },
+    "background": {
+      "default": { "$value": "{color.neutral.900}" },
+      "subtle": { "$value": "{color.neutral.800}" },
+      "muted": { "$value": "{color.neutral.700}" }
+    },
+    "border": {
+      "default": { "$value": "{color.neutral.700}" },
+      "strong": { "$value": "{color.neutral.400}" }
+    }
+  }
+}
+```
+
+### React implementation
+
+```tsx
+// components/ThemeProvider.tsx
+'use client';
+
+import { createContext, useContext, useEffect, useState } from 'react';
+
+type Theme = 'light' | 'dark' | 'system';
+
+const ThemeContext = createContext<{
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}>({ theme: 'system', setTheme: () => {} });
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>('system');
+
+  useEffect(() => {
+    const stored = localStorage.getItem('theme') as Theme | null;
+    if (stored) setTheme(stored);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const resolved =
+      theme === 'system'
+        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+        : theme;
+
+    root.setAttribute('data-theme', resolved);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export const useTheme = () => useContext(ThemeContext);
+```
+
+The entire UI reacts to a single `data-theme` attribute change on the root element. No re-renders. No context updates propagating through the tree. CSS does all the work.
+
+## Responsive Tokens
+
+Some design decisions change with viewport size. A heading that's 48px on desktop might be 32px on mobile. Spacing that's generous on large screens should compress on small ones.
+
+CSS custom properties can't be responsive on their own, but you can reassign them in media queries:
+
+```css
+:root {
+  --spacing-page-x: 16px;
+  --spacing-page-y: 24px;
+  --typography-heading-xl: 28px;
+  --typography-heading-lg: 22px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --spacing-page-x: 32px;
+    --spacing-page-y: 40px;
+    --typography-heading-xl: 40px;
+    --typography-heading-lg: 28px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --spacing-page-x: 64px;
+    --spacing-page-y: 48px;
+    --typography-heading-xl: 48px;
+    --typography-heading-lg: 32px;
+  }
+}
+```
+
+Components consume these tokens without knowing about breakpoints:
+
+```css
+.page-container {
+  padding: var(--spacing-page-y) var(--spacing-page-x);
+}
+
+.page-title {
+  font-size: var(--typography-heading-xl);
+}
+```
+
+<Warning>
+Don't make every token responsive. Only page-level spacing and typography sizes typically need to change across breakpoints. Component-level spacing (like padding inside a button) should stay constant. If a button's padding needs to change on mobile, that's a component variant, not a responsive token.
+</Warning>
+
+## Consumption Patterns in React
+
+### With Tailwind CSS
+
+Tailwind is my default for new projects. Integrating tokens means extending the Tailwind config with your token values:
+
+```tsx
+// tailwind.config.ts
+import type { Config } from 'tailwindcss';
+import { tokens } from './dist/tailwind/tailwind-tokens';
+
+export default {
+  theme: {
+    colors: {
+      text: {
+        primary: 'var(--color-text-primary)',
+        secondary: 'var(--color-text-secondary)',
+        brand: 'var(--color-text-brand)',
+        danger: 'var(--color-text-danger)',
+        success: 'var(--color-text-success)',
+        inverse: 'var(--color-text-inverse)',
+      },
+      bg: {
+        default: 'var(--color-background-default)',
+        subtle: 'var(--color-background-subtle)',
+        muted: 'var(--color-background-muted)',
+        brand: 'var(--color-background-brand)',
+        danger: 'var(--color-background-danger)',
+      },
+      border: {
+        DEFAULT: 'var(--color-border-default)',
+        strong: 'var(--color-border-strong)',
+        brand: 'var(--color-border-brand)',
+      },
+    },
+    spacing: {
+      'inline-xs': 'var(--spacing-inline-xs)',
+      'inline-sm': 'var(--spacing-inline-sm)',
+      'inline-md': 'var(--spacing-inline-md)',
+      'inline-lg': 'var(--spacing-inline-lg)',
+      'stack-sm': 'var(--spacing-stack-sm)',
+      'stack-md': 'var(--spacing-stack-md)',
+      'stack-lg': 'var(--spacing-stack-lg)',
+    },
+  },
+} satisfies Config;
+```
+
+Usage becomes clean and consistent:
+
+```tsx
+function InvoiceCard({ invoice }: { invoice: Invoice }) {
+  return (
+    <div className="rounded-lg border-border bg-bg-subtle p-stack-md">
+      <h3 className="text-text-primary font-semibold">{invoice.number}</h3>
+      <p className="text-text-secondary mt-stack-sm">{invoice.clientName}</p>
+      <span className="text-text-brand font-mono">{formatMoney(invoice.total)}</span>
+    </div>
+  );
+}
+```
+
+### With vanilla CSS / CSS Modules
+
+```css
+/* InvoiceCard.module.css */
+.card {
+  background: var(--color-background-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-stack-md);
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-size: var(--typography-size-lg);
+  font-weight: var(--typography-weight-semibold);
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-stack-sm);
+}
+```
+
+## Token Versioning and Governance
+
+Tokens are a shared dependency. Changing a token affects every component that uses it. This requires a governance process — lightweight, but explicit.
+
+### Semantic versioning for tokens
+
+- **Patch:** Value change within the same intent (adjusting `color.text.secondary` from `#6B7280` to `#4B5563`)
+- **Minor:** New tokens added (adding `color.background.warning`)
+- **Major:** Token renamed, removed, or restructured
+
+### The governance workflow
+
+1. **Proposal:** Designer or engineer proposes a token change with rationale
+2. **Impact assessment:** How many components are affected? Run a quick search for the token name across the codebase.
+3. **Review:** Design system team reviews. For major changes, affected teams are notified.
+4. **Migration:** For breaking changes, provide a codemod or migration guide.
+5. **Release:** Publish the new tokens with a changelog.
+
+```bash
+# Quick impact assessment: how many files use this token?
+rg "color-text-secondary" --type css --type tsx -c
+# Shows: 47 files reference this token
+```
+
+## Measuring Adoption
+
+A token system is only as good as its adoption. Measure it.
+
+```tsx
+// scripts/token-coverage.ts
+import postcss from 'postcss';
+import { glob } from 'glob';
+
+async function measureTokenCoverage() {
+  const cssFiles = await glob('src/**/*.css');
+  let totalColorValues = 0;
+  let tokenizedColorValues = 0;
+
+  for (const file of cssFiles) {
+    const css = await fs.readFile(file, 'utf-8');
+    const root = postcss.parse(css);
+
+    root.walkDecls((decl) => {
+      if (isColorProperty(decl.prop)) {
+        totalColorValues++;
+        if (decl.value.includes('var(--color-')) {
+          tokenizedColorValues++;
+        }
+      }
+    });
+  }
+
+  const coverage = (tokenizedColorValues / totalColorValues * 100).toFixed(1);
+  console.log(`Token coverage: ${coverage}%`);
+  console.log(`${tokenizedColorValues}/${totalColorValues} color values use tokens`);
+}
+```
+
+At Weel, we track token coverage in CI. Any PR that introduces a raw color value (not a token) gets a warning. Not a blocking error — sometimes raw values are justified — but a visible signal that prompts a conversation.
+
+<Tip>
+Aim for 90%+ token coverage for colors and spacing. 100% is neither realistic nor worth pursuing. Optical adjustments, one-off illustrations, and third-party component overrides will always need raw values. The goal is to make tokens the default, not the mandate.
+</Tip>
+
+## The Token Lifecycle
+
+Tokens are living artifacts. Here's how I think about their lifecycle:
+
+1. **Design decision is made** in Figma — a new color is chosen, a spacing scale is defined
+2. **Token is defined** in Figma Variables with proper naming and categorization
+3. **Token is exported** to JSON via API or plugin
+4. **Token is transformed** by Style Dictionary into CSS, JS, and Tailwind formats
+5. **Token is consumed** in production code via CSS custom properties or JS imports
+6. **Token is measured** — coverage tracking confirms adoption
+7. **Token is evolved** — values change, new tokens are added, old ones are deprecated
+8. **Token is retired** — deprecated tokens are removed in a major version
+
+The pipeline from step 2 to step 5 should be automated. A designer changes a Figma variable, CI syncs the token, Style Dictionary rebuilds the outputs, a PR is opened with the changes. Engineers review the diff and merge. The whole cycle takes minutes, not days.
+
+That's the system. Not a tool or a file format — a pipeline that connects design intent to production pixels, with type safety and governance at every step.

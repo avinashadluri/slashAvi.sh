@@ -44,6 +44,35 @@
         "tab": "Dev",
         "groups": [
           {
+            "group": "Full-Stack TypeScript",
+            "pages": [
+              "dev/fullstack-typescript",
+              "dev/nextjs-patterns",
+              "dev/nodejs-backend-patterns",
+              "dev/api-design-guide"
+            ]
+          },
+          {
+            "group": "Design Systems",
+            "pages": [
+              "dev/design-systems-at-scale",
+              "dev/component-api-design",
+              "dev/design-tokens-in-practice"
+            ]
+          },
+          {
+            "group": "Engineering Deep Dives",
+            "pages": [
+              "dev/typescript-patterns",
+              "dev/react-server-components",
+              "dev/performance-budgets",
+              "dev/monorepo-guide",
+              "dev/frontend-dx",
+              "dev/code-review-guide",
+              "dev/debugging-production"
+            ]
+          },
+          {
             "group": "Development",
             "pages": [
               "dev/web-development",
@@ -58,20 +87,6 @@
               "dev/coding-standards",
               "dev/architecture-patterns",
               "dev/testing-strategies"
-            ]
-          },
-          {
-            "group": "Engineering Deep Dives",
-            "pages": [
-              "dev/component-api-design",
-              "dev/typescript-patterns",
-              "dev/react-server-components",
-              "dev/design-systems-at-scale",
-              "dev/performance-budgets",
-              "dev/monorepo-guide",
-              "dev/frontend-dx",
-              "dev/code-review-guide",
-              "dev/debugging-production"
             ]
           },
           {
@@ -155,6 +170,15 @@
               "ai/evaluating-llm-output",
               "ai/shipping-ai-features",
               "ai/agents-in-production"
+            ]
+          },
+          {
+            "group": "AI Tooling & Workflows",
+            "pages": [
+              "ai/claude-code-mastery",
+              "ai/cursor-workflows",
+              "ai/vercel-ai-sdk-patterns",
+              "ai/llama-local-models"
             ]
           },
           {

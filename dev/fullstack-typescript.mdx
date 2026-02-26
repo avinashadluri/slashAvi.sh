@@ -1,0 +1,500 @@
+---
+title: "The Full-Stack TypeScript Playbook"
+description: "How I build end-to-end type-safe applications with Next.js, NestJS, tRPC, Prisma, and shared contracts — one language, zero drift."
+---
+
+# The Full-Stack TypeScript Playbook
+
+The pitch for full-stack TypeScript is simple: one language, one type system, from database to browser. The reality is more nuanced. Having built full-stack TypeScript systems at Weel and MetaLabs — systems that handle financial transactions, complex business logic, and real user traffic — I can tell you the pitch undersells the benefits and completely ignores the costs.
+
+This is the playbook I've refined over years. It's opinionated. It works.
+
+## The Case for TypeScript Everywhere
+
+The most impactful benefit of full-stack TypeScript isn't "developers only need to know one language." That's a hiring argument, not a technical one. The real benefit is **shared types eliminate an entire category of integration bugs**.
+
+Consider the lifecycle of a bug in a non-TypeScript stack:
+
+1. Backend engineer adds a field `dueDate` to the API response
+2. Frontend engineer reads the API docs (if they exist) and types it as `due_date`
+3. The field renders as `undefined` in the UI
+4. QA catches it (maybe)
+5. A Slack thread happens
+6. Someone fixes the casing
+
+In a full-stack TypeScript setup:
+
+1. Backend engineer adds `dueDate` to the shared type
+2. Frontend code that references the type immediately gets autocomplete
+3. If there's a mismatch, the compiler catches it before anyone pushes code
+
+This isn't theoretical. At Weel, we share Zod schemas between our Next.js frontend and NestJS backend. When a backend engineer changes a validation rule, the frontend tests fail in CI within minutes. The feedback loop is measured in minutes, not days.
+
+## Monorepo Structure
+
+The monorepo is the foundation. Without it, sharing types between frontend and backend is a versioning nightmare involving published npm packages, semver, and stale dependencies. With a monorepo, shared code is just an import path.
+
+Here's the structure I use:
+
+```
+apps/
+  web/                    # Next.js frontend
+    src/
+    next.config.ts
+    package.json
+  api/                    # NestJS backend
+    src/
+    package.json
+  worker/                 # Background job processor
+    src/
+    package.json
+packages/
+  shared/                 # Shared types, schemas, utils
+    src/
+      types/
+        invoice.ts
+        user.ts
+        api.ts
+      schemas/
+        invoice.schema.ts
+        user.schema.ts
+      utils/
+        money.ts
+        date.ts
+      index.ts
+    package.json
+  config/                 # Shared config (ESLint, TSConfig, etc.)
+    eslint-config/
+    tsconfig/
+    package.json
+  ui/                     # Shared UI components (if applicable)
+    src/
+    package.json
+turbo.json
+package.json
+```
+
+I use Turborepo for orchestration. The `turbo.json` defines the build pipeline:
+
+```json
+{
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
+  }
+}
+```
+
+The `^build` dependency means packages are built before apps that depend on them. Turborepo handles the ordering and parallelization. `turbo run build` builds everything in the right order. `turbo run dev` starts all dev servers in parallel.
+
+<Info>
+The `packages/shared` package is the backbone of the entire monorepo. It's where Zod schemas, TypeScript types, and shared utility functions live. Both `apps/web` and `apps/api` import from `@repo/shared`. This is the single source of truth for your data contracts.
+</Info>
+
+## tRPC for End-to-End Type Safety
+
+tRPC eliminates the API layer as a source of bugs. There's no schema to maintain, no codegen step, no OpenAPI spec to keep in sync. The server defines procedures, the client calls them, and TypeScript infers the types across the boundary.
+
+### Server setup
+
+```tsx
+// apps/api/src/trpc/router.ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { z } from 'zod';
+import { CreateInvoiceSchema, InvoiceQuerySchema } from '@repo/shared';
+
+const t = initTRPC.context<Context>().create();
+
+const authed = t.middleware(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: 'UNAUTHORIZED' });
+  }
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+
+const protectedProcedure = t.procedure.use(authed);
+
+export const invoiceRouter = t.router({
+  list: protectedProcedure
+    .input(InvoiceQuerySchema)
+    .query(async ({ ctx, input }) => {
+      return ctx.invoiceService.findByOrg(ctx.user.orgId, input);
+    }),
+
+  byId: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.invoiceService.findByIdOrThrow(input.id, ctx.user.orgId);
+    }),
+
+  create: protectedProcedure
+    .input(CreateInvoiceSchema)
+    .mutation(async ({ ctx, input }) => {
+      return ctx.invoiceService.create(input, ctx.user);
+    }),
+
+  send: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.invoiceService.send(input.id, ctx.user);
+    }),
+});
+
+export const appRouter = t.router({
+  invoice: invoiceRouter,
+  // ... other routers
+});
+
+export type AppRouter = typeof appRouter;
+```
+
+### Client setup
+
+```tsx
+// apps/web/src/lib/trpc.ts
+import { createTRPCReact } from '@trpc/react-query';
+import type { AppRouter } from '@repo/api/trpc/router';
+
+export const trpc = createTRPCReact<AppRouter>();
+```
+
+### Usage in components
+
+```tsx
+// apps/web/src/components/InvoiceList.tsx
+'use client';
+
+import { trpc } from '@/lib/trpc';
+
+export function InvoiceList() {
+  const { data, isLoading, error } = trpc.invoice.list.useQuery({
+    status: 'all',
+    page: 1,
+    pageSize: 20,
+  });
+
+  // data is fully typed as PaginatedResult<Invoice>
+  // No manual type annotation needed. TypeScript infers it from the server.
+
+  if (isLoading) return <InvoicesSkeleton />;
+  if (error) return <ErrorState message={error.message} />;
+
+  return (
+    <ul>
+      {data.items.map((invoice) => (
+        // invoice is fully typed — autocomplete works for all fields
+        <InvoiceRow key={invoice.id} invoice={invoice} />
+      ))}
+    </ul>
+  );
+}
+```
+
+The magic: `data.items[0].` gives you autocomplete for every field on the invoice. Change a field name on the server, the client gets a type error immediately. No API docs to update. No `fetch` calls to type manually. No `as Invoice` type assertions.
+
+### When tRPC is NOT the right choice
+
+tRPC is perfect when the frontend and backend are owned by the same team. It's not ideal when:
+
+- **You need a public API** — tRPC isn't designed for third-party consumers. Use REST with OpenAPI for public APIs.
+- **Multiple clients in different languages** — tRPC's type safety only works in TypeScript. If you have a mobile app in Swift/Kotlin, they can't use tRPC types.
+- **You need HTTP caching** — tRPC uses POST for mutations (naturally) but also uses POST for batched queries by default, which makes CDN caching harder.
+
+<Warning>
+Don't use tRPC as your only API layer if you'll ever need a public API or non-TypeScript clients. I typically run tRPC for the primary frontend and a separate REST/OpenAPI layer for external integrations. The backend service layer is shared — only the transport differs.
+</Warning>
+
+## Prisma as the Source of Truth
+
+In a full-stack TypeScript monorepo, Prisma is the foundation. Your schema defines the database, generates the client, and produces types that flow through the entire stack.
+
+```prisma
+// packages/shared/prisma/schema.prisma
+model Invoice {
+  id              String        @id @default(uuid())
+  invoiceNumber   String
+  status          InvoiceStatus @default(DRAFT)
+  organizationId  String
+  clientId        String
+  dueDate         DateTime
+  currency        String        @default("AUD")
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  client          Client        @relation(fields: [clientId], references: [id])
+  lineItems       LineItem[]
+  payments        Payment[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, dueDate])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+```
+
+From this schema, Prisma generates TypeScript types. But I don't expose Prisma types directly to the frontend. Instead, I create DTOs in the shared package that transform Prisma types into API-safe shapes:
+
+```tsx
+// packages/shared/src/types/invoice.ts
+import type { Invoice, Client, LineItem } from '@prisma/client';
+
+export type InvoiceDto = {
+  id: string;
+  invoiceNumber: string;
+  status: Invoice['status'];
+  client: Pick<Client, 'id' | 'name' | 'email'>;
+  lineItems: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unitPriceCents: number;
+    totalCents: number;
+  }>;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  currency: string;
+  dueDate: string;
+  createdAt: string;
+};
+```
+
+The separation matters. Prisma types include relations, internal fields, and database-specific concerns. API DTOs are clean, flat, and stable. You can change the database schema without changing the API contract, and vice versa.
+
+## Shared Zod Schemas
+
+The crown jewel of the full-stack TypeScript setup: Zod schemas that validate on both sides.
+
+```tsx
+// packages/shared/src/schemas/invoice.schema.ts
+import { z } from 'zod';
+
+export const LineItemSchema = z.object({
+  description: z.string().min(1, 'Description is required').max(500),
+  quantity: z.number().int().positive('Must be at least 1').max(10000),
+  unitPriceCents: z.number().int().positive('Price must be positive'),
+  taxRate: z.number().min(0).max(1).default(0),
+});
+
+export const CreateInvoiceSchema = z.object({
+  clientId: z.string().uuid('Invalid client ID'),
+  lineItems: z.array(LineItemSchema).min(1, 'At least one line item required').max(100),
+  dueDate: z.string().datetime('Invalid date format'),
+  notes: z.string().max(2000).optional(),
+  currency: z.enum(['AUD', 'USD', 'EUR', 'GBP']).default('AUD'),
+});
+
+export type CreateInvoiceInput = z.infer<typeof CreateInvoiceSchema>;
+
+export const InvoiceQuerySchema = z.object({
+  status: z.enum(['all', 'DRAFT', 'SENT', 'PAID', 'OVERDUE', 'CANCELLED']).default('all'),
+  search: z.string().optional(),
+  page: z.number().int().positive().default(1),
+  pageSize: z.number().int().positive().max(100).default(20),
+  sortBy: z.enum(['createdAt', 'dueDate', 'totalCents', 'invoiceNumber']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export type InvoiceQueryInput = z.infer<typeof InvoiceQuerySchema>;
+```
+
+On the **backend**, these schemas validate incoming requests:
+
+```tsx
+// apps/api — NestJS controller or tRPC procedure
+const parsed = CreateInvoiceSchema.parse(req.body);
+```
+
+On the **frontend**, the same schemas power form validation:
+
+```tsx
+// apps/web — React Hook Form integration
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { CreateInvoiceSchema, type CreateInvoiceInput } from '@repo/shared';
+
+export function CreateInvoiceForm() {
+  const form = useForm<CreateInvoiceInput>({
+    resolver: zodResolver(CreateInvoiceSchema),
+    defaultValues: {
+      currency: 'AUD',
+      lineItems: [{ description: '', quantity: 1, unitPriceCents: 0, taxRate: 0.1 }],
+    },
+  });
+
+  // Form fields get validation for free.
+  // "At least one line item required" shows on the frontend
+  // AND is enforced on the backend. Same schema. Same rules.
+}
+```
+
+One schema definition. Two validation points. Zero drift.
+
+## API Contract Testing
+
+Even with shared types, you should test that the actual API responses match the expected shape. Types are compile-time guarantees. Contract tests are runtime guarantees.
+
+```tsx
+// apps/api/test/contracts/invoice.contract.spec.ts
+import { CreateInvoiceSchema, InvoiceDtoSchema } from '@repo/shared';
+
+describe('Invoice API Contract', () => {
+  it('POST /invoices returns a valid InvoiceDto', async () => {
+    const input = {
+      clientId: testClient.id,
+      lineItems: [{ description: 'Consulting', quantity: 10, unitPriceCents: 15000, taxRate: 0.1 }],
+      dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+      currency: 'AUD',
+    };
+
+    CreateInvoiceSchema.parse(input);
+
+    const response = await request(app.getHttpServer())
+      .post('/api/invoices')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send(input)
+      .expect(201);
+
+    const parsed = InvoiceDtoSchema.safeParse(response.body.data);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.status).toBe('DRAFT');
+    expect(parsed.data?.lineItems).toHaveLength(1);
+  });
+});
+```
+
+These tests catch the sneaky bugs: a backend change that adds a field the schema doesn't expect, a serialization issue that turns a number into a string, a date format that changes between environments.
+
+## Environment Config with Type Safety
+
+Environment variables are a notorious source of runtime errors. "It works on my machine" almost always traces back to a missing or misconfigured env var.
+
+```tsx
+// packages/shared/src/config/env.ts
+import { z } from 'zod';
+
+const ServerEnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
+  JWT_SECRET: z.string().min(32),
+  SMTP_HOST: z.string(),
+  SMTP_PORT: z.coerce.number(),
+  SMTP_USER: z.string(),
+  SMTP_PASS: z.string(),
+  STRIPE_SECRET_KEY: z.string().startsWith('sk_'),
+  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_'),
+});
+
+export type ServerEnv = z.infer<typeof ServerEnvSchema>;
+
+let _env: ServerEnv | null = null;
+
+export function getServerEnv(): ServerEnv {
+  if (!_env) {
+    const parsed = ServerEnvSchema.safeParse(process.env);
+    if (!parsed.success) {
+      console.error('Invalid environment variables:', parsed.error.flatten());
+      throw new Error('Invalid environment configuration. Check server logs.');
+    }
+    _env = parsed.data;
+  }
+  return _env;
+}
+```
+
+```tsx
+// apps/web/src/config/client-env.ts
+const ClientEnvSchema = z.object({
+  NEXT_PUBLIC_API_URL: z.string().url(),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().startsWith('pk_'),
+  NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+});
+
+export type ClientEnv = z.infer<typeof ClientEnvSchema>;
+
+export const clientEnv = ClientEnvSchema.parse({
+  NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+});
+```
+
+<Tip>
+Validate environment variables at startup, not at first use. If a required variable is missing, the app should fail loudly on boot — not 20 minutes later when a user triggers a code path that reads the variable.
+</Tip>
+
+## Deployment Strategies
+
+### One repo, separate deployments (what I recommend)
+
+The monorepo contains everything, but each app deploys independently:
+
+- `apps/web` → Vercel (or any Next.js hosting)
+- `apps/api` → Railway / Fly.io / AWS ECS
+- `apps/worker` → Same infra as API, different process
+
+CI builds all apps from the same commit. Turborepo's `--filter` flag ensures only affected apps are rebuilt and deployed:
+
+```bash
+# Only build/deploy what changed
+turbo run build --filter=web...
+turbo run build --filter=api...
+```
+
+### The "full-stack TypeScript tax"
+
+Let me be honest about the costs:
+
+| Benefit | Cost |
+|---------|------|
+| Shared types eliminate integration bugs | Monorepo tooling has a learning curve |
+| One language reduces context switching | TypeScript on the backend is slower than Go/Rust for CPU-bound work |
+| Zod schemas work on both ends | Prisma adds a generation step to your build |
+| tRPC gives instant type safety | tRPC couples your frontend to your backend |
+| One `tsconfig` strategy (in theory) | In practice, you'll have 4-5 tsconfigs with subtle differences |
+| npm/pnpm workspace linking is seamless | Until it isn't — phantom dependencies and hoisting issues are real |
+
+The tax is worth it for product-focused teams building internal tools and SaaS products where iteration speed matters more than raw performance. It's NOT worth it for high-throughput systems where you need Go or Rust, or for teams where frontend and backend are owned by entirely separate organizations.
+
+I've been paying this tax for years. The compound interest on shared types and fast iteration has been worth it every time. But I went in with eyes open, and you should too.
+
+## The Checklist
+
+When I set up a new full-stack TypeScript project, this is the checklist:
+
+1. **Monorepo with Turborepo** — `apps/` for deployable units, `packages/` for shared code
+2. **Prisma in `packages/shared`** — single source of truth for database types
+3. **Zod schemas in `packages/shared`** — shared validation between frontend and backend
+4. **tRPC (or OpenAPI + codegen)** — type-safe API communication
+5. **Shared `tsconfig` base** — consistent compiler options across all packages
+6. **Shared ESLint config** — consistent code style
+7. **Environment validation at startup** — Zod schemas for env vars
+8. **Contract tests** — verify API responses match shared schemas
+9. **CI that typechecks everything** — `turbo run typecheck` catches drift before merge
+10. **Separate deployments** — one repo, independent deploy pipelines
+
+Get these right and you'll spend your time building features instead of debugging integration issues. That's the real promise of full-stack TypeScript — and it actually delivers.

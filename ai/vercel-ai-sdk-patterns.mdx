@@ -1,0 +1,934 @@
+---
+title: "Vercel AI SDK: Production Patterns"
+description: "Patterns for building AI features with Vercel AI SDK — streaming, structured output, tool calling, and the patterns that ship."
+---
+
+# Vercel AI SDK: Production Patterns
+
+The Vercel AI SDK is how I build every AI feature that ships to users. Not LangChain, not raw API calls, not a custom abstraction layer. The AI SDK. After shipping AI features across PromptLib, MetaLabs, and production applications at Weel, I've converged on it for one reason: it handles the hard parts (streaming, provider abstraction, structured output) while staying out of the way for everything else.
+
+This guide covers the patterns I use daily — from basic streaming to multi-step agent flows — with real code from production applications.
+
+## Why Vercel AI SDK
+
+### vs Raw API Calls
+
+Raw `fetch` calls to OpenAI or Anthropic work. I started there. Then you need streaming. Then you need to parse server-sent events. Then you need abort controllers. Then you need to handle different response formats across providers. Then you need structured output validation. Then you need token counting. Then you need retry logic.
+
+Each feature is individually simple. Together, they're 500+ lines of infrastructure code that every project reimplements slightly differently. The AI SDK replaces all of it with well-tested, well-typed primitives.
+
+### vs LangChain
+
+LangChain is a framework. The AI SDK is a library. That distinction matters.
+
+LangChain wants to own your entire AI pipeline — prompts, chains, memory, tools, agents, output parsers. It introduces its own abstractions for everything, and when those abstractions don't fit your use case, you fight the framework.
+
+The AI SDK gives you building blocks: `generateText`, `streamText`, `generateObject`, `streamObject`. You compose them with standard TypeScript. No chains, no abstract base classes, no callback managers. Just functions that do what they say.
+
+I use LangChain for exactly one thing: complex document processing pipelines where its text splitters and document loaders save time. For everything user-facing, it's the AI SDK.
+
+### vs Direct SDKs (OpenAI SDK, Anthropic SDK)
+
+The provider-specific SDKs are excellent. But they lock you to one provider. The AI SDK wraps them with a unified interface while exposing provider-specific features when you need them. I can switch from OpenAI to Anthropic by changing one import — the same streaming logic, the same structured output, the same tool calling interface.
+
+## Core Architecture
+
+The AI SDK is split into three packages:
+
+| Package | Purpose | Environment |
+|---|---|---|
+| `ai` | Core functions: `generateText`, `streamText`, `generateObject`, `streamObject` | Server (Node.js, Edge) |
+| `@ai-sdk/react` | React hooks: `useChat`, `useCompletion`, `useObject` | Client (Browser) |
+| `@ai-sdk/ui-utils` | Framework-agnostic UI utilities | Client |
+
+Provider packages connect to specific models:
+
+```bash
+pnpm add ai @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
+```
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
+
+const model = openai("gpt-4o");
+const model = anthropic("claude-sonnet-4-20250514");
+const model = google("gemini-2.0-flash");
+```
+
+## Streaming Text: The Foundation
+
+Streaming is the default for user-facing AI features. Users perceive streaming responses as faster because they see progress immediately.
+
+### Server: Stream Generation
+
+```typescript
+import { streamText } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+export async function POST(req: Request) {
+  const { messages } = await req.json();
+
+  const result = streamText({
+    model: openai("gpt-4o-mini"),
+    system: "You are a helpful coding assistant. Be concise.",
+    messages,
+    maxTokens: 2048,
+    temperature: 0.7,
+  });
+
+  return result.toDataStreamResponse();
+}
+```
+
+### Client: useChat Hook
+
+```tsx
+"use client";
+
+import { useChat } from "@ai-sdk/react";
+
+export function ChatInterface() {
+  const { messages, input, handleInputChange, handleSubmit, isLoading, stop } =
+    useChat({
+      api: "/api/chat",
+      onError: (error) => {
+        toast.error("Something went wrong. Please try again.");
+      },
+    });
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto space-y-4 p-4">
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={m.role === "user" ? "text-right" : "text-left"}
+          >
+            <div
+              className={`inline-block rounded-lg px-4 py-2 max-w-[80%] ${
+                m.role === "user"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-900"
+              }`}
+            >
+              <Markdown>{m.content}</Markdown>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSubmit} className="border-t p-4 flex gap-2">
+        <input
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Ask anything..."
+          className="flex-1 rounded-lg border px-4 py-2"
+          disabled={isLoading}
+        />
+        {isLoading ? (
+          <button type="button" onClick={stop} className="px-4 py-2 rounded-lg bg-red-500 text-white">
+            Stop
+          </button>
+        ) : (
+          <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 text-white">
+            Send
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+```
+
+`useChat` handles the entire client-server streaming lifecycle — sending messages, parsing the stream, accumulating tokens, managing loading state, and supporting cancellation. It's a remarkable amount of complexity hidden behind a clean hook.
+
+<Tip>
+Always implement the stop button. Users want to cancel long generations, and stopping early saves tokens (and money). The `stop` function from `useChat` sends an abort signal to the server.
+</Tip>
+
+## Structured Output: The Game Changer
+
+Structured output with `generateObject` is the feature that made me go all-in on the AI SDK. Instead of parsing free-text responses and hoping they're valid, you define a Zod schema and the SDK guarantees the output conforms to it.
+
+### Basic Structured Output
+
+```typescript
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+
+const sentimentSchema = z.object({
+  sentiment: z.enum(["positive", "negative", "neutral"]),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+  topics: z.array(z.string()).max(5),
+});
+
+type SentimentAnalysis = z.infer<typeof sentimentSchema>;
+
+async function analyzeSentiment(text: string): Promise<SentimentAnalysis> {
+  const { object } = await generateObject({
+    model: openai("gpt-4o-mini"),
+    schema: sentimentSchema,
+    prompt: `Analyze the sentiment of this text:\n\n${text}`,
+  });
+
+  return object;
+}
+```
+
+The output is typed, validated, and guaranteed to match your schema. No regex parsing. No "please respond in JSON format" prompt hacks. No `try { JSON.parse(response) }` catch blocks.
+
+### Complex Nested Schemas
+
+```typescript
+const codeReviewSchema = z.object({
+  summary: z.string().describe("One-paragraph summary of the changes"),
+  risk_level: z.enum(["low", "medium", "high", "critical"]),
+  findings: z.array(
+    z.object({
+      severity: z.enum(["error", "warning", "info"]),
+      file: z.string(),
+      line: z.number().optional(),
+      description: z.string(),
+      suggestion: z.string().optional(),
+    })
+  ),
+  tests_adequate: z.boolean(),
+  security_concerns: z.array(z.string()),
+  approval_recommendation: z.enum(["approve", "request_changes", "discuss"]),
+});
+
+async function reviewPullRequest(diff: string) {
+  const { object: review } = await generateObject({
+    model: openai("gpt-4o"),
+    schema: codeReviewSchema,
+    system: "You are a senior engineer reviewing a pull request. Be thorough but practical.",
+    prompt: `Review this diff:\n\n${diff}`,
+  });
+
+  return review;
+}
+```
+
+The `.describe()` calls on schema fields guide the model's output. They're like inline prompt instructions tied to specific fields.
+
+### Streaming Structured Output
+
+For larger objects, stream the generation so users see partial results:
+
+```typescript
+import { streamObject } from "ai";
+
+export async function POST(req: Request) {
+  const { document } = await req.json();
+
+  const result = streamObject({
+    model: openai("gpt-4o-mini"),
+    schema: z.object({
+      title: z.string(),
+      summary: z.string(),
+      key_points: z.array(z.string()),
+      action_items: z.array(
+        z.object({
+          task: z.string(),
+          priority: z.enum(["high", "medium", "low"]),
+          assignee: z.string().optional(),
+        })
+      ),
+    }),
+    prompt: `Analyze this document:\n\n${document}`,
+  });
+
+  return result.toTextStreamResponse();
+}
+```
+
+```tsx
+"use client";
+
+import { useObject } from "@ai-sdk/react";
+
+export function DocumentAnalysis({ documentId }: { documentId: string }) {
+  const { object, isLoading, error } = useObject({
+    api: "/api/analyze",
+    schema: documentAnalysisSchema,
+  });
+
+  return (
+    <div>
+      {object?.title && <h2>{object.title}</h2>}
+      {object?.summary && <p>{object.summary}</p>}
+      {object?.key_points?.map((point, i) => (
+        <li key={i}>{point}</li>
+      ))}
+      {isLoading && <Spinner />}
+    </div>
+  );
+}
+```
+
+The UI renders incrementally as each field completes. Users see the title appear, then the summary fills in, then key points stream in one by one. It feels alive.
+
+## Tool Calling: AI That Takes Actions
+
+Tool calling lets the model invoke functions you define. This is how you build AI features that do things — search databases, call APIs, perform calculations — not just generate text.
+
+### Defining Tools
+
+```typescript
+import { generateText, tool } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+
+const result = await generateText({
+  model: openai("gpt-4o"),
+  tools: {
+    searchDocuments: tool({
+      description: "Search the knowledge base for relevant documents",
+      parameters: z.object({
+        query: z.string().describe("The search query"),
+        limit: z.number().default(5).describe("Max results to return"),
+      }),
+      execute: async ({ query, limit }) => {
+        const results = await vectorSearch(query, limit);
+        return results.map((r) => ({
+          title: r.title,
+          content: r.content.slice(0, 500),
+          score: r.score,
+        }));
+      },
+    }),
+
+    createTicket: tool({
+      description: "Create a support ticket in the system",
+      parameters: z.object({
+        title: z.string(),
+        description: z.string(),
+        priority: z.enum(["low", "medium", "high", "urgent"]),
+      }),
+      execute: async ({ title, description, priority }) => {
+        const ticket = await db.tickets.create({ title, description, priority });
+        return { ticketId: ticket.id, url: `/tickets/${ticket.id}` };
+      },
+    }),
+
+    getCurrentUser: tool({
+      description: "Get information about the current user",
+      parameters: z.object({}),
+      execute: async () => {
+        const user = await getCurrentUser();
+        return { name: user.name, email: user.email, plan: user.plan };
+      },
+    }),
+  },
+  maxSteps: 5,
+  prompt: userMessage,
+});
+```
+
+### Multi-Step Tool Flows
+
+The `maxSteps` parameter enables multi-turn tool use. The model can call a tool, process the result, and decide to call another tool — up to `maxSteps` iterations.
+
+```typescript
+const result = await generateText({
+  model: openai("gpt-4o"),
+  system: `You are a customer support agent. You have access to tools for looking up 
+orders, checking account status, and creating tickets. Always look up relevant 
+information before responding. If you can't resolve the issue, create a ticket.`,
+  tools: {
+    lookupOrder: tool({ /* ... */ }),
+    checkAccountStatus: tool({ /* ... */ }),
+    createTicket: tool({ /* ... */ }),
+    sendEmail: tool({ /* ... */ }),
+  },
+  maxSteps: 8,
+  messages,
+  onStepFinish: ({ text, toolCalls, toolResults }) => {
+    console.log("Step completed:", {
+      toolsCalled: toolCalls?.map((tc) => tc.toolName),
+      hasText: !!text,
+    });
+  },
+});
+```
+
+A typical flow: User asks "Where's my order #1234?" → Model calls `lookupOrder({orderId: "1234"})` → Gets result → Model calls `checkAccountStatus({userId: "..."})` → Gets result → Model generates a comprehensive response with shipping status and account details.
+
+<Warning>
+Set `maxSteps` to a reasonable limit for your use case. Too low and the model can't complete complex tasks. Too high and a confused model can loop, burning tokens. I use 3-5 for most features and 8-10 for complex agent flows.
+</Warning>
+
+## Server Actions + AI SDK
+
+In Next.js App Router, server actions are the cleanest way to integrate AI features.
+
+```typescript
+"use server";
+
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+
+const tagSchema = z.object({
+  tags: z.array(z.string()).min(1).max(10),
+  category: z.enum(["technical", "business", "design", "other"]),
+  difficulty: z.enum(["beginner", "intermediate", "advanced"]),
+});
+
+export async function autoTagPrompt(content: string) {
+  const { object } = await generateObject({
+    model: openai("gpt-4o-mini"),
+    schema: tagSchema,
+    prompt: `Analyze this prompt template and generate relevant tags, 
+a category, and difficulty level:\n\n${content}`,
+  });
+
+  return object;
+}
+```
+
+```tsx
+"use client";
+
+import { autoTagPrompt } from "@/actions/prompts";
+import { useState, useTransition } from "react";
+
+export function PromptEditor() {
+  const [tags, setTags] = useState<string[]>([]);
+  const [isPending, startTransition] = useTransition();
+
+  function handleAutoTag() {
+    startTransition(async () => {
+      const result = await autoTagPrompt(content);
+      setTags(result.tags);
+      setCategory(result.category);
+      setDifficulty(result.difficulty);
+    });
+  }
+
+  return (
+    <button onClick={handleAutoTag} disabled={isPending}>
+      {isPending ? "Analyzing..." : "Auto-tag with AI"}
+    </button>
+  );
+}
+```
+
+Server actions with `generateObject` are my go-to for non-streaming AI features — classification, tagging, extraction, transformation. Clean, typed, no API route boilerplate.
+
+## Provider Switching
+
+The AI SDK's provider abstraction pays off when you need to switch models.
+
+### Environment-Based Provider Selection
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
+
+type ModelConfig = {
+  provider: "openai" | "anthropic" | "google";
+  model: string;
+};
+
+const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  fast: { provider: "openai", model: "gpt-4o-mini" },
+  balanced: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+  reasoning: { provider: "openai", model: "o1-mini" },
+  creative: { provider: "anthropic", model: "claude-sonnet-4-20250514" },
+};
+
+function getModel(config: ModelConfig) {
+  switch (config.provider) {
+    case "openai":
+      return openai(config.model);
+    case "anthropic":
+      return anthropic(config.model);
+    case "google":
+      return google(config.model);
+  }
+}
+
+export function getModelForTask(task: keyof typeof MODEL_CONFIGS) {
+  const config = MODEL_CONFIGS[process.env.MODEL_OVERRIDE as string] ||
+    MODEL_CONFIGS[task];
+  return getModel(config);
+}
+```
+
+```typescript
+const result = await generateText({
+  model: getModelForTask("balanced"),
+  prompt: userMessage,
+});
+```
+
+### Fallback Chain
+
+```typescript
+import { generateText } from "ai";
+
+async function generateWithFallback(params: Parameters<typeof generateText>[0]) {
+  const providers = [
+    openai("gpt-4o-mini"),
+    anthropic("claude-haiku-4-20250514"),
+    google("gemini-2.0-flash"),
+  ];
+
+  for (const model of providers) {
+    try {
+      return await generateText({ ...params, model });
+    } catch (error) {
+      console.warn(`Provider ${model.modelId} failed:`, error);
+      continue;
+    }
+  }
+
+  throw new Error("All providers failed");
+}
+```
+
+## Error Handling and Retries
+
+Production AI features need robust error handling.
+
+```typescript
+import { generateText, APICallError } from "ai";
+
+async function safeGenerate<T>(
+  fn: () => Promise<T>,
+  options: { maxRetries?: number; retryDelay?: number } = {}
+): Promise<T> {
+  const { maxRetries = 3, retryDelay = 1000 } = options;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof APICallError) {
+        if (error.statusCode === 429) {
+          const delay = retryDelay * Math.pow(2, attempt - 1);
+          console.warn(`Rate limited. Retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        if (error.statusCode && error.statusCode >= 500) {
+          console.warn(`Server error (${error.statusCode}). Retry ${attempt}/${maxRetries}`);
+          await new Promise((r) => setTimeout(r, retryDelay));
+          continue;
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed after ${maxRetries} retries`);
+}
+
+const result = await safeGenerate(() =>
+  generateText({
+    model: openai("gpt-4o-mini"),
+    prompt: userMessage,
+  })
+);
+```
+
+## Rate Limiting
+
+Protect your API keys and budget with request-level rate limiting.
+
+```typescript
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(20, "1 m"),
+  analytics: true,
+});
+
+export async function POST(req: Request) {
+  const userId = await getUserId(req);
+  const { success, remaining, reset } = await ratelimit.limit(userId);
+
+  if (!success) {
+    return new Response(
+      JSON.stringify({
+        error: "Rate limit exceeded",
+        retryAfter: Math.ceil((reset - Date.now()) / 1000),
+      }),
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil((reset - Date.now()) / 1000)),
+          "X-RateLimit-Remaining": String(remaining),
+        },
+      }
+    );
+  }
+
+  const result = streamText({
+    model: openai("gpt-4o-mini"),
+    messages: await req.json().then((b) => b.messages),
+  });
+
+  return result.toDataStreamResponse();
+}
+```
+
+## Cost Tracking
+
+Track every AI request for billing and budget management.
+
+```typescript
+import { generateText } from "ai";
+
+async function trackedGenerate(
+  params: Parameters<typeof generateText>[0],
+  metadata: { userId: string; feature: string }
+) {
+  const start = Date.now();
+
+  const result = await generateText(params);
+
+  const usage = result.usage;
+  const durationMs = Date.now() - start;
+
+  await db.aiUsage.create({
+    userId: metadata.userId,
+    feature: metadata.feature,
+    model: params.model.modelId,
+    inputTokens: usage.promptTokens,
+    outputTokens: usage.completionTokens,
+    totalTokens: usage.totalTokens,
+    durationMs,
+    estimatedCost: calculateCost(
+      params.model.modelId,
+      usage.promptTokens,
+      usage.completionTokens
+    ),
+    timestamp: new Date(),
+  });
+
+  return result;
+}
+
+function calculateCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const pricing: Record<string, { input: number; output: number }> = {
+    "gpt-4o": { input: 2.5 / 1_000_000, output: 10 / 1_000_000 },
+    "gpt-4o-mini": { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+    "claude-sonnet-4-20250514": { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+  };
+
+  const p = pricing[model] || { input: 0, output: 0 };
+  return inputTokens * p.input + outputTokens * p.output;
+}
+```
+
+## Caching Responses
+
+For deterministic or near-deterministic requests, caching saves significant cost.
+
+```typescript
+import { createHash } from "crypto";
+
+function getCacheKey(model: string, messages: any[], schema?: any): string {
+  const payload = JSON.stringify({ model, messages, schema });
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+async function cachedGenerate<T>(
+  params: Parameters<typeof generateObject>[0] & { cacheTtlSeconds?: number }
+): Promise<T> {
+  const { cacheTtlSeconds = 3600, ...generateParams } = params;
+
+  const cacheKey = `ai:cache:${getCacheKey(
+    generateParams.model.modelId,
+    "messages" in generateParams ? generateParams.messages : [],
+    generateParams.schema
+  )}`;
+
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    metrics.increment("ai.cache.hit");
+    return JSON.parse(cached as string);
+  }
+
+  metrics.increment("ai.cache.miss");
+
+  const { object } = await generateObject(generateParams as any);
+
+  await redis.setex(cacheKey, cacheTtlSeconds, JSON.stringify(object));
+
+  return object as T;
+}
+```
+
+<Info>
+Cache hit rates vary dramatically by feature. FAQ/support bots: 20-40% hit rate. Creative generation: near 0%. Classification and extraction: 30-60% if inputs repeat. Measure before optimizing.
+</Info>
+
+## Testing AI Features
+
+Testing AI features is inherently different from testing deterministic code. Here's my approach.
+
+### Snapshot Testing for Structured Output
+
+```typescript
+import { describe, it, expect } from "vitest";
+
+describe("autoTagPrompt", () => {
+  it("returns valid tags for a coding prompt", async () => {
+    const result = await autoTagPrompt(
+      "Write a React component that displays a sortable data table with pagination"
+    );
+
+    expect(result.tags.length).toBeGreaterThan(0);
+    expect(result.tags.length).toBeLessThanOrEqual(10);
+    expect(["technical", "business", "design", "other"]).toContain(result.category);
+    expect(result.category).toBe("technical");
+    expect(["beginner", "intermediate", "advanced"]).toContain(result.difficulty);
+  });
+});
+```
+
+### Mock Provider for Unit Tests
+
+```typescript
+import { MockLanguageModelV1 } from "ai/test";
+
+const mockModel = new MockLanguageModelV1({
+  defaultObjectGenerationMode: "json",
+  doGenerate: async () => ({
+    rawCall: { rawPrompt: null, rawSettings: {} },
+    finishReason: "stop",
+    usage: { promptTokens: 10, completionTokens: 20 },
+    text: JSON.stringify({
+      tags: ["react", "typescript"],
+      category: "technical",
+      difficulty: "intermediate",
+    }),
+  }),
+});
+
+it("processes auto-tag results correctly", async () => {
+  const result = await generateObject({
+    model: mockModel,
+    schema: tagSchema,
+    prompt: "test",
+  });
+
+  expect(result.object.tags).toContain("react");
+});
+```
+
+### Eval Suite for Quality
+
+For production AI features, I maintain an eval suite that runs weekly:
+
+```typescript
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+const evalCases = [
+  {
+    input: "Write a function that sorts an array",
+    expectedCategory: "technical",
+    expectedDifficulty: "beginner",
+    requiredTags: ["coding", "algorithms"],
+  },
+  // ... 100+ cases
+];
+
+async function runEvals() {
+  const results = await Promise.all(
+    evalCases.map(async (tc) => {
+      const { object } = await generateObject({
+        model: openai("gpt-4o-mini"),
+        schema: tagSchema,
+        prompt: `Analyze: ${tc.input}`,
+      });
+
+      return {
+        pass:
+          object.category === tc.expectedCategory &&
+          tc.requiredTags.every((t) => object.tags.includes(t)),
+        expected: tc,
+        actual: object,
+      };
+    })
+  );
+
+  const passRate = results.filter((r) => r.pass).length / results.length;
+  console.log(`Pass rate: ${(passRate * 100).toFixed(1)}%`);
+
+  if (passRate < 0.85) {
+    throw new Error(`Eval pass rate ${passRate} below threshold 0.85`);
+  }
+}
+```
+
+## Real Patterns from PromptLib and MetaLabs
+
+### PromptLib: Prompt Analysis Pipeline
+
+When a user saves a prompt template in PromptLib, the system automatically analyzes it:
+
+```typescript
+export async function analyzePrompt(content: string) {
+  const { object } = await generateObject({
+    model: openai("gpt-4o-mini"),
+    schema: z.object({
+      variables: z.array(
+        z.object({
+          name: z.string(),
+          description: z.string(),
+          type: z.enum(["text", "number", "list", "boolean"]),
+          required: z.boolean(),
+        })
+      ),
+      category: z.string(),
+      tags: z.array(z.string()).max(8),
+      estimatedTokens: z.number(),
+      suggestedModels: z.array(z.string()),
+      qualityTips: z.array(z.string()).max(3),
+    }),
+    prompt: `Analyze this prompt template. Identify variables (marked with {{brackets}}), 
+categorize it, estimate token usage, and suggest improvements:\n\n${content}`,
+  });
+
+  return object;
+}
+```
+
+This runs as a server action triggered on save, with results stored in the database for search and filtering.
+
+### MetaLabs: Multi-Model Comparison
+
+MetaLabs lets users compare outputs from different models. The AI SDK's provider abstraction makes this clean:
+
+```typescript
+async function compareModels(prompt: string, models: string[]) {
+  const results = await Promise.all(
+    models.map(async (modelId) => {
+      const model = getModelById(modelId);
+      const start = Date.now();
+
+      const { text, usage } = await generateText({
+        model,
+        prompt,
+        maxTokens: 1024,
+      });
+
+      return {
+        modelId,
+        text,
+        latencyMs: Date.now() - start,
+        tokens: usage.totalTokens,
+        cost: calculateCost(modelId, usage.promptTokens, usage.completionTokens),
+      };
+    })
+  );
+
+  return results;
+}
+```
+
+## Migration from Raw OpenAI SDK
+
+If you're currently using the OpenAI SDK directly, here's the migration path.
+
+### Before (OpenAI SDK)
+
+```typescript
+import OpenAI from "openai";
+
+const openai = new OpenAI();
+
+const completion = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    { role: "system", content: "You are a helpful assistant." },
+    { role: "user", content: userMessage },
+  ],
+  temperature: 0.7,
+});
+
+const text = completion.choices[0].message.content;
+const tokens = completion.usage?.total_tokens;
+```
+
+### After (AI SDK)
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+const { text, usage } = await generateText({
+  model: openai("gpt-4o-mini"),
+  system: "You are a helpful assistant.",
+  prompt: userMessage,
+  temperature: 0.7,
+});
+
+const tokens = usage.totalTokens;
+```
+
+### Streaming Migration
+
+```typescript
+// Before: manual SSE parsing
+const stream = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages,
+  stream: true,
+});
+
+const encoder = new TextEncoder();
+return new Response(
+  new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        const text = chunk.choices[0]?.delta?.content || "";
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+      }
+      controller.close();
+    },
+  })
+);
+
+// After: one line
+const result = streamText({ model: openai("gpt-4o-mini"), messages });
+return result.toDataStreamResponse();
+```
+
+The migration is incremental. You can use both SDKs in the same project and migrate route by route.
+
+<Warning>
+The AI SDK's `messages` format is slightly different from OpenAI's native format. Multi-modal messages (images), function calls, and tool results have different shapes. Test each migrated route with the full range of inputs, not just simple text messages.
+</Warning>
+
+## Patterns I Keep Coming Back To
+
+**Structured output for everything that isn't chat.** Classification, extraction, tagging, analysis — always `generateObject` with a Zod schema. The type safety and guaranteed valid output eliminate an entire class of bugs.
+
+**Server actions for non-streaming features.** Simple, typed, no API route boilerplate. The `useTransition` hook gives you loading state for free.
+
+**Feature flags on the model, not the feature.** Instead of flagging the entire AI feature on/off, flag the model selection. This lets you A/B test different models and quickly downgrade to a cheaper model if costs spike.
+
+**Streaming by default for user-facing, structured output for system-level.** Users benefit from seeing progressive output. Backend pipelines benefit from guaranteed valid output.
+
+**Track everything from day one.** Every AI call should log: model, tokens, latency, cost, feature name, user ID. You will need this data. You will need it sooner than you think.
+
+The AI SDK's genius is that it makes the right patterns easy and the wrong patterns hard. Streaming is a one-liner. Structured output is type-safe by default. Provider switching requires changing one import. Once you've built with it, going back to raw API calls feels like writing HTTP requests by hand in the age of `fetch`.

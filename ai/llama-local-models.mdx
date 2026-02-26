@@ -1,0 +1,615 @@
+---
+title: "Llama and Open-Weight Models: The Builder's Guide"
+description: "Running Llama, DeepSeek, Mistral, and other open models locally — setup, fine-tuning, and real use cases beyond the hype."
+---
+
+# Llama and Open-Weight Models: The Builder's Guide
+
+I've covered the practical basics of running local models in my [local LLMs guide](/ai/local-llms-guide). This guide goes deeper — into the model architectures, fine-tuning, quantization internals, production deployment, and the real engineering decisions you face when building with open-weight models.
+
+If you're past "how do I run Ollama" and want to understand which models to pick for which tasks, when fine-tuning is worth the investment, how to squeeze maximum performance from your hardware, and how to build real products on open models — this is the guide.
+
+## Why Open-Weight Models Matter
+
+The strategic case for open-weight models goes beyond "they're free." Five forces make them essential for serious builders:
+
+**Privacy by architecture.** When you run inference on your hardware, data never leaves your network. This isn't a policy promise from a vendor — it's physics. For healthcare, finance, legal, and any domain with regulatory constraints, this is non-negotiable. At Weel, prototyping with customer financial data means local models or nothing.
+
+**Cost predictability.** API pricing is per-token and variable. Local inference is a capital expenditure that amortizes to near-zero marginal cost. For high-throughput workloads — batch processing, embeddings, classification pipelines — the economics flip dramatically in favor of local within weeks.
+
+**Customization depth.** You can fine-tune open models on your domain data. You can merge LoRA adapters. You can quantize to exact specifications. You can modify the inference pipeline. Try doing any of that with a closed API.
+
+**Reliability independence.** No rate limits, no outages, no sudden deprecations, no surprise pricing changes. Your model runs when you tell it to run. I've had production features break because an API provider changed their content filtering policy overnight. Never again for workloads I can run locally.
+
+**Speed of iteration.** When inference is free, you experiment differently. You try 50 prompt variations instead of 5. You process your entire test suite through the model. You build feedback loops that would be prohibitively expensive with API calls.
+
+## The Llama 3 Family: Deep Dive
+
+Meta's Llama 3 is the foundation of the open-weight ecosystem. Understanding its family tree helps you pick the right variant.
+
+### Llama 3.1 Architecture
+
+Llama 3.1 comes in three sizes: 8B, 70B, and 405B parameters. All share the same architecture — dense transformer with grouped-query attention (GQA), SwiGLU activation, and RoPE positional encoding — but differ in layer count and dimension.
+
+| Variant | Parameters | Layers | Hidden Dim | Context | Min RAM (Q4) |
+|---|---|---|---|---|---|
+| 8B | 8.03B | 32 | 4096 | 128K | 6GB |
+| 70B | 70.6B | 80 | 8192 | 128K | 40GB |
+| 405B | 405B | 126 | 16384 | 128K | 230GB |
+
+The 128K context window is genuine — Llama 3.1 was trained with long-context data, not just extrapolated. In practice, quality degrades beyond 32K tokens for most tasks, but it handles long documents far better than Llama 2 did.
+
+### Llama 3.2: Multimodal and Small
+
+Llama 3.2 added two important branches:
+
+**Small models (1B, 3B):** Designed for on-device inference. The 3B model is surprisingly capable for classification, extraction, and simple generation tasks. I use it for preprocessing pipelines where I need to classify thousands of documents — fast and cheap.
+
+**Vision models (11B, 90B):** Llama's first multimodal models. Accept images alongside text. The 11B vision model runs on a 16GB Mac and handles document understanding, chart reading, and image description well enough for production preprocessing.
+
+```bash
+ollama pull llama3.2:3b
+ollama pull llama3.2-vision:11b
+```
+
+### Llama 3.3: The Sweet Spot
+
+Llama 3.3 70B is a significant quality upgrade over 3.1 70B — closer to GPT-4 on many benchmarks — while maintaining the same architecture and hardware requirements. If you're running a 70B model, use 3.3.
+
+```bash
+ollama pull llama3.3:70b
+```
+
+## DeepSeek: The Dark Horse
+
+DeepSeek models disrupted the open-weight landscape with quality that rivaled much larger models.
+
+### DeepSeek-V3
+
+DeepSeek-V3 is a 671B parameter mixture-of-experts (MoE) model that activates only 37B parameters per token. This means it runs significantly faster than a dense 671B model while maintaining quality competitive with GPT-4o and Claude Sonnet.
+
+The catch: even with MoE, you need substantial hardware. The quantized version still requires 128GB+ RAM. For most individual developers, this is a cloud workload.
+
+### DeepSeek-R1: Reasoning
+
+DeepSeek-R1 is the open-weight reasoning model. It uses chain-of-thought internally, similar to OpenAI's o1. The distilled versions (1.5B, 7B, 8B, 14B, 32B, 70B) bring reasoning capabilities to models you can actually run locally.
+
+```bash
+ollama pull deepseek-r1:8b     # Runs on 8GB RAM
+ollama pull deepseek-r1:14b    # Runs on 16GB RAM
+ollama pull deepseek-r1:32b    # Runs on 24GB RAM
+```
+
+I use DeepSeek-R1 14B for complex reasoning tasks locally — code debugging, mathematical proofs, multi-step logic problems. It's remarkably good for its size when you need the model to think through a problem rather than pattern-match.
+
+<Tip>
+DeepSeek-R1 distilled models show their reasoning in `<think>` tags. Parse these out for user-facing applications but keep them for debugging — the reasoning trace is invaluable for understanding why the model made a particular decision.
+</Tip>
+
+### DeepSeek-Coder
+
+For pure code tasks, DeepSeek-Coder V2 remains one of the best open-weight options. The 16B version handles code generation, review, and debugging at a level that genuinely surprised me — competitive with GPT-4o-mini on coding benchmarks.
+
+## Mistral, Phi, Gemma: Honest Comparison
+
+### Mistral / Mixtral
+
+**Mistral 7B** was the model that proved small models could be good. It's still solid for general-purpose tasks but has been surpassed by Llama 3.1 8B in most benchmarks.
+
+**Mixtral 8x7B** uses mixture-of-experts — 8 expert networks, 2 activated per token. Total parameters: 46.7B. Active parameters per token: ~12.9B. This gives you quality approaching 70B models at speeds closer to a 13B model. The trade-off: it needs more RAM than a dense 13B (around 26GB for Q4).
+
+**Mistral Large (123B)** is Mistral's frontier model. Strong multilingual capabilities and good at structured output. I use it when I need French or German language support that Llama handles poorly.
+
+### Phi (Microsoft)
+
+**Phi-3 Mini (3.8B)** — Punches well above its weight for a model this small. Microsoft trained it on "textbook quality" data, and it shows. For simple tasks on constrained hardware, it's the go-to.
+
+**Phi-3 Medium (14B)** — A solid mid-tier option. Good at instruction following and structured output. I've found it slightly less capable than Llama 3.1 8B despite being larger, due to Llama's superior training data.
+
+**Phi-4 (14B)** — Significant improvement over Phi-3. Strong at reasoning tasks and competitive with much larger models. Worth evaluating if you're in the 14B range.
+
+### Gemma 2 (Google)
+
+**Gemma 2 9B** is excellent at structured output and instruction following. It's my pick for tasks that require well-formatted JSON output or adhering to strict templates. Google's training methodology emphasizes instruction fidelity.
+
+**Gemma 2 27B** offers quality approaching Llama 3.1 70B for certain tasks in a more compact package. If you're RAM-constrained and need something between 9B and 70B, consider it.
+
+### My Model Picks by Task
+
+| Task | Primary | Fallback | Why |
+|---|---|---|---|
+| General coding | DeepSeek-Coder V2 16B | Llama 3.3 70B | Best code quality for size |
+| Complex reasoning | DeepSeek-R1 14B | DeepSeek-R1 32B | Chain-of-thought reasoning |
+| Text generation | Llama 3.3 70B | Llama 3.1 8B | Best general quality |
+| Structured output | Gemma 2 9B | Llama 3.1 8B | Reliable JSON/schema following |
+| Classification | Llama 3.2 3B | Phi-3 Mini | Fast, accurate enough |
+| Embeddings | nomic-embed-text | mxbai-embed-large | Best open embedding model |
+| Vision tasks | Llama 3.2 Vision 11B | — | Only viable local option |
+| Multilingual | Mistral Large | Llama 3.1 70B | Superior non-English support |
+
+## Hardware Deep Dive
+
+### Apple Silicon: Unified Memory Is the Killer Feature
+
+Apple's M-series chips use unified memory — a single pool shared between CPU and GPU. For LLM inference, this eliminates the PCIe bottleneck that discrete GPUs face when loading model weights.
+
+The practical impact: an M4 Max with 128GB unified memory can load a 70B Q5 model entirely in memory and run inference using the full GPU bandwidth. An equivalent NVIDIA setup would need a workstation GPU with 48GB+ VRAM, or multiple GPUs with NVLink.
+
+**Memory bandwidth matters more than compute.** LLM inference is memory-bandwidth-bound, not compute-bound. The M4 Max has 546 GB/s memory bandwidth. This is why Apple Silicon punches above its weight for LLM inference despite having fewer raw TFLOPS than high-end NVIDIA GPUs.
+
+```bash
+# Check your Mac's specs
+system_profiler SPHardwareDataType | grep -E "Chip|Memory"
+```
+
+### NVIDIA: VRAM Is Everything
+
+For NVIDIA GPUs, VRAM determines the largest model you can run. If the model doesn't fit in VRAM, performance falls off a cliff because the system offloads to system RAM over PCIe — 10-20x slower.
+
+| Setup | VRAM | Best For | Approx. Cost |
+|---|---|---|---|
+| RTX 4060 Ti 16GB | 16GB | 7B-13B models | $400 |
+| RTX 4090 | 24GB | 13B-34B models | $1,600 |
+| RTX 4090 x2 (NVLink) | 48GB | 70B Q4 models | $3,200+ |
+| A6000 | 48GB | 70B Q5 models | $4,500 |
+| H100 | 80GB | 70B Q8 or 405B Q3 | Cloud only ($2-4/hr) |
+
+### Cloud GPU: When Local Hardware Isn't Enough
+
+For models too large for your local hardware, or when you need GPU compute for fine-tuning:
+
+| Provider | Best For | Pricing (H100) |
+|---|---|---|
+| RunPod | Development, experimenting | ~$2.50/hr |
+| Lambda Labs | Fine-tuning, training | ~$2.49/hr |
+| vast.ai | Cost-sensitive batch jobs | ~$1.50/hr (spot) |
+| Together.ai | Serverless inference | Per-token pricing |
+| Modal | Burst compute, serverless | Per-second billing |
+
+I use RunPod for fine-tuning jobs and Modal for serverless inference when I need a 70B+ model without managing infrastructure.
+
+## llama.cpp: The Engine Under the Hood
+
+Ollama is the friendly interface. Under the hood, it uses `llama.cpp` — a C/C++ library that's the most optimized inference engine for consumer hardware. Understanding llama.cpp gives you fine-grained control.
+
+### When to Use llama.cpp Directly
+
+- You need custom quantization parameters
+- You want to benchmark different configurations
+- You're building a custom inference pipeline
+- You need features Ollama doesn't expose (speculative decoding, grammar-constrained generation)
+- You're deploying to production on Linux servers
+
+### Building from Source
+
+```bash
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp
+
+# macOS with Metal (Apple Silicon)
+make LLAMA_METAL=1
+
+# Linux with CUDA
+make LLAMA_CUDA=1
+
+# CPU only (not recommended for interactive use)
+make
+```
+
+### Running Inference
+
+```bash
+# Interactive chat
+./llama-cli -m models/llama-3.1-8b-instruct-Q4_K_M.gguf \
+  -c 8192 \
+  -n 512 \
+  --color \
+  -i \
+  --temp 0.7
+
+# Server mode (OpenAI-compatible API)
+./llama-server -m models/llama-3.1-8b-instruct-Q4_K_M.gguf \
+  -c 8192 \
+  --port 8080 \
+  --host 0.0.0.0
+```
+
+### Grammar-Constrained Generation
+
+One of llama.cpp's killer features: force the model to output valid JSON, SQL, or any format defined by a GBNF grammar.
+
+```bash
+# Force valid JSON output
+./llama-cli -m models/llama-3.1-8b-instruct-Q4_K_M.gguf \
+  --grammar-file grammars/json.gbnf \
+  -p "Extract the name and age from: 'John is 32 years old'"
+```
+
+This eliminates the "model returned invalid JSON" problem entirely. The output is guaranteed to parse correctly.
+
+## Quantization Deep Dive
+
+My [local LLMs guide](/ai/local-llms-guide) covers quantization basics. Here's the engineering detail.
+
+### GGUF Format Internals
+
+GGUF (GPT-Generated Unified Format) is the standard model file format for llama.cpp and Ollama. It stores quantized weights, tokenizer data, and model metadata in a single file.
+
+Quantization types in GGUF:
+
+| Type | Bits/Weight | Technique | Quality Impact |
+|---|---|---|---|
+| Q2_K | 2.5 | K-quant super-aggressive | Severe degradation |
+| Q3_K_S | 3.4 | K-quant small | Major degradation |
+| Q3_K_M | 3.9 | K-quant medium | Significant degradation |
+| Q4_0 | 4.5 | Uniform round-to-nearest | Noticeable, uneven |
+| Q4_K_M | 4.8 | K-quant medium | Slight degradation — **sweet spot** |
+| Q4_K_S | 4.5 | K-quant small | Moderate degradation |
+| Q5_0 | 5.5 | Uniform round-to-nearest | Minor degradation |
+| Q5_K_M | 5.7 | K-quant medium | Minimal degradation |
+| Q6_K | 6.6 | K-quant | Near-lossless |
+| Q8_0 | 8.5 | 8-bit uniform | Effectively lossless |
+| F16 | 16.0 | Half-precision float | Original quality |
+
+### K-Quant: Why It Matters
+
+The `_K_` variants (K-quant) use importance-aware quantization. Instead of quantizing all layers equally, K-quant allocates more bits to attention layers (which are more sensitive to precision loss) and fewer bits to feed-forward layers. The result: Q4_K_M is significantly better than Q4_0 at the same average bits per weight.
+
+**My quantization decision tree:**
+
+```
+Can the model fit at Q8_0? → Use Q8_0
+Can it fit at Q5_K_M? → Use Q5_K_M
+Can it fit at Q4_K_M? → Use Q4_K_M (this is the most common case)
+Can it only fit at Q3_K_M or lower? → Consider a smaller model at higher quant
+```
+
+A Q4_K_M 70B model is almost always better than a Q8_0 34B model. Size matters more than quantization precision for overall quality.
+
+<Warning>
+Below Q3, quality degrades rapidly and unpredictably. Models start hallucinating, losing instruction-following ability, and producing incoherent output. If Q3_K_M doesn't fit, use a smaller model — don't go to Q2.
+</Warning>
+
+### Custom Quantization with llama.cpp
+
+```bash
+# Convert a HuggingFace model to GGUF
+python convert_hf_to_gguf.py \
+  --outfile models/my-model-f16.gguf \
+  --outtype f16 \
+  path/to/hf/model/
+
+# Quantize to Q4_K_M
+./llama-quantize models/my-model-f16.gguf models/my-model-Q4_K_M.gguf Q4_K_M
+
+# Quantize with importance matrix (imatrix) for better quality
+./llama-imatrix -m models/my-model-f16.gguf \
+  -f calibration-data.txt \
+  -o models/my-model.imatrix
+
+./llama-quantize --imatrix models/my-model.imatrix \
+  models/my-model-f16.gguf models/my-model-IQ4_XS.gguf IQ4_XS
+```
+
+Importance-matrix quantization (`IQ` types) uses calibration data to determine which weights matter most. It produces better quality at the same bit-width, at the cost of a longer quantization process.
+
+## Fine-Tuning with LoRA
+
+Fine-tuning is the process of training a model on your specific data to improve performance on your domain. LoRA (Low-Rank Adaptation) makes this feasible on consumer hardware by training only a small number of additional parameters.
+
+### When Fine-Tuning Is Worth It
+
+Fine-tune when:
+- You have a specific output format the model struggles to follow consistently
+- You need domain-specific knowledge not in the base model's training data
+- You want to replicate a very specific writing or coding style
+- Prompt engineering alone can't achieve the quality you need
+
+Don't fine-tune when:
+- Better prompting would solve the problem (try this first, always)
+- You have fewer than 500 high-quality training examples
+- The task is general-purpose (base models are already good)
+- You need the model to learn facts (fine-tuning is better for style/format than knowledge)
+
+### LoRA Fine-Tuning with Unsloth
+
+Unsloth is the fastest way to fine-tune on consumer hardware. It's 2x faster than standard implementations and uses 60% less memory.
+
+```python
+from unsloth import FastLanguageModel
+from trl import SFTTrainer
+from datasets import load_dataset
+
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/llama-3.1-8b-instruct-bnb-4bit",
+    max_seq_length=2048,
+    load_in_4bit=True,
+)
+
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=16,              # LoRA rank — higher = more capacity, more VRAM
+    lora_alpha=16,
+    lora_dropout=0,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                     "gate_proj", "up_proj", "down_proj"],
+)
+
+dataset = load_dataset("json", data_files="training_data.jsonl")
+
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    train_dataset=dataset["train"],
+    dataset_text_field="text",
+    max_seq_length=2048,
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=4,
+    warmup_steps=10,
+    num_train_epochs=3,
+    learning_rate=2e-4,
+    fp16=True,
+    logging_steps=10,
+    output_dir="./outputs",
+)
+
+trainer.train()
+model.save_pretrained_merged("./merged_model", tokenizer)
+```
+
+### Training Data Format
+
+```jsonl
+{"text": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a code review assistant for a TypeScript project.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nReview this function:\n```typescript\nfunction getUser(id) { return db.query('SELECT * FROM users WHERE id = ' + id) }\n```<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n🔴 **SQL Injection vulnerability.** The `id` parameter is concatenated directly into the SQL query. Use parameterized queries:\n```typescript\nfunction getUser(id: string): Promise<User> {\n  return db.query('SELECT * FROM users WHERE id = $1', [id])\n}\n```\nAlso: add TypeScript types for the parameter and return value.<|eot_id|>"}
+```
+
+### Exporting Fine-Tuned Models to Ollama
+
+```bash
+# Export to GGUF
+python llama.cpp/convert_hf_to_gguf.py \
+  --outfile my-model.gguf \
+  --outtype q4_k_m \
+  ./merged_model/
+
+# Create Ollama Modelfile
+cat > Modelfile << 'EOF'
+FROM ./my-model.gguf
+PARAMETER temperature 0.1
+PARAMETER num_ctx 4096
+SYSTEM "You are a TypeScript code review assistant."
+EOF
+
+# Import into Ollama
+ollama create my-code-reviewer -f Modelfile
+ollama run my-code-reviewer
+```
+
+## Local RAG: Beyond the Basics
+
+My local RAG setup has evolved significantly. Here's the production-grade version.
+
+```python
+import chromadb
+from ollama import Client
+
+ollama = Client()
+chroma = chromadb.PersistentClient(path="./chroma_db")
+
+collection = chroma.get_or_create_collection(
+    name="codebase",
+    metadata={"hnsw:space": "cosine"}
+)
+
+def index_file(filepath: str, content: str):
+    chunks = chunk_by_function(content) if filepath.endswith(('.ts', '.py')) \
+        else chunk_by_paragraph(content, max_tokens=512)
+
+    for i, chunk in enumerate(chunks):
+        embedding = ollama.embeddings(
+            model="nomic-embed-text",
+            prompt=chunk
+        )["embedding"]
+
+        collection.add(
+            ids=[f"{filepath}:{i}"],
+            embeddings=[embedding],
+            documents=[chunk],
+            metadatas=[{"filepath": filepath, "chunk_index": i}]
+        )
+
+def query_rag(question: str, n_results: int = 5) -> str:
+    query_embedding = ollama.embeddings(
+        model="nomic-embed-text",
+        prompt=question
+    )["embedding"]
+
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=n_results,
+        include=["documents", "metadatas", "distances"]
+    )
+
+    context_parts = []
+    for doc, meta, dist in zip(
+        results["documents"][0],
+        results["metadatas"][0],
+        results["distances"][0]
+    ):
+        if dist < 0.7:
+            context_parts.append(f"[{meta['filepath']}]\n{doc}")
+
+    context = "\n\n---\n\n".join(context_parts)
+
+    response = ollama.chat(
+        model="llama3.1:8b",
+        messages=[
+            {"role": "system", "content": f"Answer based on this codebase context. "
+             f"Cite file paths when referencing code.\n\n{context}"},
+            {"role": "user", "content": question}
+        ]
+    )
+
+    return response["message"]["content"]
+```
+
+### Chunking Strategy
+
+The quality of RAG is 80% determined by chunking. Bad chunks → bad retrieval → bad answers.
+
+**For code:** Chunk by function/class, not by line count. A function split across two chunks is useless for retrieval.
+
+**For documentation:** Chunk by section (heading-based splitting), with overlap. Each chunk should be self-contained enough to be useful without the surrounding text.
+
+**For structured data:** Chunk by record/entry. Each chunk is one complete item.
+
+## Running Models in Docker
+
+For reproducible deployments and team sharing:
+
+```dockerfile
+FROM ollama/ollama:latest
+
+COPY Modelfile /tmp/Modelfile
+COPY my-model.gguf /tmp/my-model.gguf
+
+RUN ollama serve & sleep 5 && \
+    ollama create my-model -f /tmp/Modelfile && \
+    kill %1
+
+EXPOSE 11434
+
+CMD ["ollama", "serve"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  api:
+    build: ./api
+    environment:
+      - LLM_BASE_URL=http://ollama:11434/v1
+      - LLM_MODEL=llama3.1:8b
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:
+```
+
+## Building APIs Around Local Models
+
+For production services backed by local models:
+
+```typescript
+import { Hono } from "hono";
+import { OpenAI } from "openai";
+import { z } from "zod";
+import { zValidator } from "@hono/zod-validator";
+
+const app = new Hono();
+
+const client = new OpenAI({
+  baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
+  apiKey: "ollama",
+});
+
+const classifySchema = z.object({
+  text: z.string().min(1).max(10000),
+  categories: z.array(z.string()).min(2).max(20),
+});
+
+app.post("/classify", zValidator("json", classifySchema), async (c) => {
+  const { text, categories } = c.req.valid("json");
+
+  const response = await client.chat.completions.create({
+    model: process.env.LLM_MODEL || "llama3.1:8b",
+    messages: [
+      {
+        role: "system",
+        content: `Classify the following text into exactly one of these categories: ${categories.join(", ")}. Respond with only the category name, nothing else.`,
+      },
+      { role: "user", content: text },
+    ],
+    temperature: 0,
+    max_tokens: 50,
+  });
+
+  const category = response.choices[0].message.content?.trim() || "unknown";
+
+  if (!categories.includes(category)) {
+    return c.json({ category: "unknown", confidence: "low" }, 200);
+  }
+
+  return c.json({ category, confidence: "high" }, 200);
+});
+
+export default app;
+```
+
+## Cost Analysis: Local vs API Over 12 Months
+
+Here's the detailed breakdown for a solo developer or small team.
+
+### Scenario: 2,000 requests/day, mixed tasks
+
+| | M4 Pro Mac Mini (48GB) | GPT-4o-mini API | Claude Sonnet API |
+|---|---|---|---|
+| Hardware | $1,800 one-time | $0 | $0 |
+| Monthly API | $0 | ~$54/mo | ~$90/mo |
+| Electricity | ~$8/mo | $0 | $0 |
+| 12-month total | **$1,896** | **$648** | **$1,080** |
+| 24-month total | **$1,992** | **$1,296** | **$2,160** |
+| Quality (1-5) | 3.5 (8B) / 4.5 (70B) | 4.0 | 4.5 |
+
+At this volume, API is cheaper for 12 months. But factor in:
+
+- **Unlimited experimentation** — local inference means trying 100 prompt variations costs nothing
+- **No rate limits** — burst to 10,000 requests during batch processing without throttling
+- **Privacy** — process sensitive data without sending it to a third party
+- **The hardware has resale value** — a Mac Mini depreciates maybe 30-40% per year
+
+### Scenario: 20,000 requests/day (team or product)
+
+| | M4 Max Mac Studio (128GB) | GPT-4o-mini API | Claude Sonnet API |
+|---|---|---|---|
+| Hardware | $4,000 one-time | $0 | $0 |
+| Monthly API | $0 | ~$540/mo | ~$900/mo |
+| Electricity | ~$15/mo | $0 | $0 |
+| 12-month total | **$4,180** | **$6,480** | **$10,800** |
+
+At scale, local wins decisively — and that's just one machine. The economics only improve as volume grows.
+
+<Info>
+These calculations use 2025 API pricing. Prices trend downward. But local hardware also gets faster and cheaper. The relative economics have remained roughly stable — local wins at high volume, API wins at low volume and when you need frontier quality.
+</Info>
+
+## Real Use Cases from Building Products
+
+### PromptLib: Local Model for Prompt Testing
+
+When building PromptLib, I used a local Llama model to test prompt templates against hundreds of inputs. The cost of running those same tests through GPT-4o would have been significant. With local inference, I could iterate freely — try a prompt variation, run it against 500 test cases, measure quality, adjust, repeat.
+
+### MetaLabs: Privacy-First Data Processing
+
+MetaLabs processes user-submitted content that may contain personal information. During development, I use local models to build and test the processing pipeline with real-ish data. The production pipeline uses API models with synthetic data, but the development loop depends on local inference for speed and privacy.
+
+### Personal Knowledge Base
+
+I have a local RAG system over my Obsidian vault — 3,000+ notes accumulated over years. It uses `nomic-embed-text` for embeddings stored in ChromaDB, and `llama3.1:8b` for generation. I query it with questions like "What were my notes on database sharding from that conference talk?" and it retrieves and synthesizes relevant notes. All on-device, all private.
+
+The open-weight ecosystem is mature enough for production work. Not for every use case — frontier intelligence still lives behind APIs — but for the growing list of tasks where a capable local model, fine-tuned to your domain, running on your hardware, is the pragmatic choice. That list gets longer every quarter.

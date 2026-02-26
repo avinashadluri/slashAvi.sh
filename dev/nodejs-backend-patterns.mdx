@@ -1,0 +1,719 @@
+---
+title: "Node.js Backend Patterns for TypeScript Engineers"
+description: "Express, NestJS, and the patterns that make TypeScript backends maintainable — dependency injection, middleware, error handling, and API design."
+---
+
+# Node.js Backend Patterns for TypeScript Engineers
+
+For most of my career, I've been the engineer who works across the entire stack. Not "frontend who sometimes writes an API endpoint" — genuinely shipping backend services that handle payment processing, invoice generation, and financial reporting. TypeScript on the backend isn't a compromise. It's a strategic choice that compounds over time.
+
+Here's the thing: the patterns that make TypeScript backends maintainable are different from the patterns that make TypeScript frontends good. The frontend world optimizes for rendering speed and bundle size. The backend world optimizes for reliability, observability, and graceful degradation. Different priorities, different patterns.
+
+## Why TypeScript on the Backend Matters
+
+The argument for TypeScript on the backend isn't "we already know it from the frontend." That's a weak argument that leads to bad backend code. The real argument is **type safety at the boundary**.
+
+Every backend service has boundaries: HTTP requests come in, database queries go out, third-party APIs are called, messages are published to queues. Every boundary is where bugs live. TypeScript gives you a way to define contracts at every boundary and enforce them at compile time.
+
+```tsx
+// Without TypeScript: you THINK this is what the request looks like
+app.post('/api/invoices', (req, res) => {
+  const { clientId, amount, dueDate } = req.body;
+  // Is clientId a string? A number? null? Who knows.
+});
+
+// With TypeScript + Zod: you KNOW
+const CreateInvoiceBody = z.object({
+  clientId: z.string().uuid(),
+  amount: z.number().positive(),
+  dueDate: z.string().datetime(),
+});
+type CreateInvoiceBody = z.infer<typeof CreateInvoiceBody>;
+
+app.post('/api/invoices', (req, res) => {
+  const body = CreateInvoiceBody.parse(req.body);
+  // body is fully typed. clientId is string, amount is number. Guaranteed.
+});
+```
+
+This eliminates the entire category of "the request body wasn't what I expected" bugs. And when you share those Zod schemas with the frontend, you've eliminated the category on both sides.
+
+## Express vs NestJS: When to Use Each
+
+I've built production services with both. Here's my honest take.
+
+### Express: The Right Choice When
+
+- **You're building a small, focused service** — a webhook handler, a microservice with 5-10 endpoints, an internal tool API
+- **You want maximum control** — Express gets out of your way
+- **The team is small and senior** — Express requires discipline that NestJS enforces automatically
+- **Cold start time matters** — serverless functions, edge functions
+
+### NestJS: The Right Choice When
+
+- **You're building a large application** — 50+ endpoints, multiple modules, complex business logic
+- **The team is mixed experience levels** — NestJS's opinionated structure prevents architectural drift
+- **You need dependency injection** — testability at scale requires DI, and NestJS has it built in
+- **You're building a monolithic backend** — NestJS's module system keeps large codebases organized
+
+### The honest trade-off
+
+Express is a library. NestJS is a framework. Express lets you structure code however you want, which is great until you're 6 months in with 4 engineers and the codebase has 4 different patterns for error handling. NestJS makes those decisions for you. The constraint is the feature.
+
+<Info>
+I reach for NestJS by default for any backend that will have more than ~15 endpoints or more than 2 engineers working on it. The upfront complexity pays for itself within weeks. For smaller services, Express with a disciplined folder structure is perfectly fine.
+</Info>
+
+## Project Structure That Scales
+
+This is the structure I use for NestJS projects. It's evolved over 4+ years and multiple production services.
+
+```
+src/
+  modules/
+    invoices/
+      invoices.module.ts
+      invoices.controller.ts
+      invoices.service.ts
+      invoices.repository.ts
+      dto/
+        create-invoice.dto.ts
+        update-invoice.dto.ts
+        invoice-query.dto.ts
+      entities/
+        invoice.entity.ts
+      invoices.service.spec.ts
+    payments/
+      payments.module.ts
+      payments.controller.ts
+      payments.service.ts
+      ...
+  common/
+    decorators/
+      current-user.decorator.ts
+      api-paginated.decorator.ts
+    filters/
+      http-exception.filter.ts
+      prisma-exception.filter.ts
+    guards/
+      auth.guard.ts
+      roles.guard.ts
+    interceptors/
+      logging.interceptor.ts
+      transform.interceptor.ts
+    pipes/
+      zod-validation.pipe.ts
+    middleware/
+      correlation-id.middleware.ts
+      request-logger.middleware.ts
+  config/
+    app.config.ts
+    database.config.ts
+    auth.config.ts
+  lib/
+    prisma/
+      prisma.service.ts
+      prisma.module.ts
+    queue/
+      queue.service.ts
+      queue.module.ts
+    email/
+      email.service.ts
+      email.module.ts
+  app.module.ts
+  main.ts
+```
+
+The key principles:
+
+- **Feature modules are self-contained.** Everything related to invoices lives in `modules/invoices/`. Controllers, services, DTOs, entities, tests — all colocated.
+- **Cross-cutting concerns live in `common/`.** Guards, filters, interceptors, decorators — things used across modules.
+- **Infrastructure lives in `lib/`.** Database clients, queue connections, email services — external system integrations.
+- **No `utils/` folder.** Every utility belongs somewhere specific. If it doesn't, it probably shouldn't exist.
+
+For Express projects, I use a similar structure but without the NestJS conventions:
+
+```
+src/
+  routes/
+    invoices.routes.ts
+    payments.routes.ts
+  services/
+    invoice.service.ts
+    payment.service.ts
+  middleware/
+    auth.ts
+    error-handler.ts
+    request-logger.ts
+  lib/
+    db.ts
+    queue.ts
+  types/
+    invoice.ts
+    payment.ts
+  app.ts
+  server.ts
+```
+
+## Dependency Injection Done Right
+
+Dependency injection in NestJS is the feature that makes large backends testable. Here's the pattern that works.
+
+```tsx
+// invoices.service.ts
+@Injectable()
+export class InvoicesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly eventBus: EventBusService,
+  ) {}
+
+  async create(dto: CreateInvoiceDto, user: AuthUser): Promise<Invoice> {
+    const invoice = await this.prisma.invoice.create({
+      data: {
+        ...dto,
+        organizationId: user.organizationId,
+        createdById: user.id,
+        status: 'DRAFT',
+      },
+    });
+
+    await this.eventBus.emit('invoice.created', {
+      invoiceId: invoice.id,
+      organizationId: user.organizationId,
+    });
+
+    return invoice;
+  }
+}
+```
+
+The power shows up in testing:
+
+```tsx
+// invoices.service.spec.ts
+describe('InvoicesService', () => {
+  let service: InvoicesService;
+  let prisma: DeepMockProxy<PrismaClient>;
+  let emailService: jest.Mocked<EmailService>;
+  let eventBus: jest.Mocked<EventBusService>;
+
+  beforeEach(async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        InvoicesService,
+        { provide: PrismaService, useValue: mockDeep<PrismaClient>() },
+        { provide: EmailService, useValue: createMock<EmailService>() },
+        { provide: EventBusService, useValue: createMock<EventBusService>() },
+      ],
+    }).compile();
+
+    service = module.get(InvoicesService);
+    prisma = module.get(PrismaService);
+    emailService = module.get(EmailService);
+    eventBus = module.get(EventBusService);
+  });
+
+  it('creates an invoice and emits an event', async () => {
+    prisma.invoice.create.mockResolvedValue(mockInvoice);
+
+    const result = await service.create(createDto, mockUser);
+
+    expect(prisma.invoice.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organizationId: mockUser.organizationId,
+        status: 'DRAFT',
+      }),
+    });
+    expect(eventBus.emit).toHaveBeenCalledWith('invoice.created', {
+      invoiceId: mockInvoice.id,
+      organizationId: mockUser.organizationId,
+    });
+  });
+});
+```
+
+Every dependency is injected, every dependency can be mocked. No real database calls in unit tests. No real email sends. Fast, isolated, reliable.
+
+## Error Handling: The Pattern That Saves You at 3am
+
+Most Node.js applications handle errors poorly. They either crash on unhandled rejections, swallow errors silently, or return inconsistent error responses. Here's the pattern I use everywhere.
+
+### Custom error classes
+
+```tsx
+// common/errors/app-error.ts
+export class AppError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+    public readonly code: string,
+    public readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = 'AppError';
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(resource: string, id: string) {
+    super(`${resource} with id ${id} not found`, 404, 'NOT_FOUND', { resource, id });
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, 409, 'CONFLICT', details);
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(errors: z.ZodError) {
+    super('Validation failed', 422, 'VALIDATION_ERROR', {
+      errors: errors.flatten(),
+    });
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message = 'Insufficient permissions') {
+    super(message, 403, 'FORBIDDEN');
+  }
+}
+```
+
+### Global exception filter (NestJS)
+
+```tsx
+// common/filters/http-exception.filter.ts
+@Catch()
+export class GlobalExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger('ExceptionFilter');
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    let status = 500;
+    let body: ErrorResponse;
+
+    if (exception instanceof AppError) {
+      status = exception.statusCode;
+      body = {
+        error: {
+          code: exception.code,
+          message: exception.message,
+          details: exception.details,
+        },
+        timestamp: new Date().toISOString(),
+        path: request.url,
+        correlationId: request.headers['x-correlation-id'] as string,
+      };
+    } else if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      body = {
+        error: {
+          code: 'HTTP_ERROR',
+          message: exception.message,
+        },
+        timestamp: new Date().toISOString(),
+        path: request.url,
+        correlationId: request.headers['x-correlation-id'] as string,
+      };
+    } else {
+      this.logger.error('Unhandled exception', exception);
+      body = {
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'An unexpected error occurred',
+        },
+        timestamp: new Date().toISOString(),
+        path: request.url,
+        correlationId: request.headers['x-correlation-id'] as string,
+      };
+    }
+
+    response.status(status).json(body);
+  }
+}
+```
+
+<Tip>
+Always include a `correlationId` in error responses. It's the thread that connects a user's bug report to your server logs. Generate it in middleware and propagate it through every log statement and error response.
+</Tip>
+
+### For Express, the equivalent
+
+```tsx
+// middleware/error-handler.ts
+export function errorHandler(
+  err: Error,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+) {
+  if (err instanceof AppError) {
+    return res.status(err.statusCode).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details,
+      },
+      correlationId: req.headers['x-correlation-id'],
+    });
+  }
+
+  logger.error('Unhandled error', {
+    error: err.message,
+    stack: err.stack,
+    correlationId: req.headers['x-correlation-id'],
+  });
+
+  return res.status(500).json({
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred',
+    },
+    correlationId: req.headers['x-correlation-id'],
+  });
+}
+```
+
+## Validation with Zod
+
+I've moved entirely to Zod for request validation. It replaces `class-validator` in NestJS and `joi` in Express. The reason: Zod schemas are also TypeScript types. One definition, two purposes.
+
+```tsx
+// dto/create-invoice.dto.ts
+import { z } from 'zod';
+
+export const CreateInvoiceDto = z.object({
+  clientId: z.string().uuid(),
+  lineItems: z.array(z.object({
+    description: z.string().min(1).max(500),
+    quantity: z.number().int().positive().max(10000),
+    unitPriceCents: z.number().int().positive(),
+    taxRate: z.number().min(0).max(1).default(0),
+  })).min(1).max(100),
+  dueDate: z.string().datetime(),
+  notes: z.string().max(2000).optional(),
+  currency: z.enum(['AUD', 'USD', 'EUR', 'GBP']).default('AUD'),
+});
+
+export type CreateInvoiceDto = z.infer<typeof CreateInvoiceDto>;
+```
+
+### Zod validation pipe for NestJS
+
+```tsx
+// common/pipes/zod-validation.pipe.ts
+@Injectable()
+export class ZodValidationPipe implements PipeTransform {
+  constructor(private schema: z.ZodSchema) {}
+
+  transform(value: unknown) {
+    const result = this.schema.safeParse(value);
+    if (!result.success) {
+      throw new ValidationError(result.error);
+    }
+    return result.data;
+  }
+}
+
+// Usage in controller
+@Post()
+async create(
+  @Body(new ZodValidationPipe(CreateInvoiceDto)) dto: CreateInvoiceDto,
+  @CurrentUser() user: AuthUser,
+) {
+  return this.invoicesService.create(dto, user);
+}
+```
+
+## Database Patterns: Prisma + PostgreSQL
+
+Prisma is my ORM of choice for TypeScript backends. It generates types from your schema, so your database queries are fully typed. Here are the patterns I've settled on.
+
+### Repository pattern with Prisma
+
+```tsx
+// modules/invoices/invoices.repository.ts
+@Injectable()
+export class InvoicesRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findByOrg(
+    orgId: string,
+    options: InvoiceQueryDto,
+  ): Promise<PaginatedResult<Invoice>> {
+    const where: Prisma.InvoiceWhereInput = {
+      organizationId: orgId,
+      ...(options.status && { status: options.status }),
+      ...(options.search && {
+        OR: [
+          { invoiceNumber: { contains: options.search, mode: 'insensitive' } },
+          { client: { name: { contains: options.search, mode: 'insensitive' } } },
+        ],
+      }),
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.invoice.findMany({
+        where,
+        include: { client: true, lineItems: true },
+        orderBy: { [options.sortBy]: options.sortOrder },
+        skip: (options.page - 1) * options.pageSize,
+        take: options.pageSize,
+      }),
+      this.prisma.invoice.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page: options.page,
+      pageSize: options.pageSize,
+      totalPages: Math.ceil(total / options.pageSize),
+    };
+  }
+
+  async findByIdOrThrow(id: string, orgId: string): Promise<Invoice> {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id, organizationId: orgId },
+      include: { client: true, lineItems: true, payments: true },
+    });
+
+    if (!invoice) throw new NotFoundError('Invoice', id);
+    return invoice;
+  }
+}
+```
+
+### Transactions for complex mutations
+
+```tsx
+async createWithLineItems(
+  dto: CreateInvoiceDto,
+  user: AuthUser,
+): Promise<Invoice> {
+  return this.prisma.$transaction(async (tx) => {
+    const invoiceNumber = await this.generateInvoiceNumber(tx, user.organizationId);
+
+    const invoice = await tx.invoice.create({
+      data: {
+        invoiceNumber,
+        organizationId: user.organizationId,
+        clientId: dto.clientId,
+        dueDate: new Date(dto.dueDate),
+        currency: dto.currency,
+        status: 'DRAFT',
+        lineItems: {
+          create: dto.lineItems.map((item, index) => ({
+            ...item,
+            sortOrder: index,
+          })),
+        },
+      },
+      include: { lineItems: true, client: true },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        action: 'INVOICE_CREATED',
+        entityType: 'INVOICE',
+        entityId: invoice.id,
+        userId: user.id,
+        organizationId: user.organizationId,
+      },
+    });
+
+    return invoice;
+  });
+}
+```
+
+<Warning>
+Prisma's interactive transactions hold a database connection for the entire duration. Keep them fast. Don't call external APIs inside a transaction. Don't send emails. Do the database writes, get out. Trigger side effects after the transaction commits.
+</Warning>
+
+## Health Checks and Graceful Shutdown
+
+Two patterns that separate toy projects from production services.
+
+### Health checks
+
+```tsx
+// health/health.controller.ts
+@Controller('health')
+export class HealthController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  @Get()
+  async check() {
+    const checks = await Promise.allSettled([
+      this.checkDatabase(),
+      this.checkRedis(),
+    ]);
+
+    const results = {
+      status: checks.every(c => c.status === 'fulfilled') ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      checks: {
+        database: checks[0].status === 'fulfilled' ? 'up' : 'down',
+        redis: checks[1].status === 'fulfilled' ? 'up' : 'down',
+      },
+    };
+
+    const statusCode = results.status === 'healthy' ? 200 : 503;
+    return { statusCode, body: results };
+  }
+
+  private async checkDatabase() {
+    await this.prisma.$queryRaw`SELECT 1`;
+  }
+
+  private async checkRedis() {
+    await this.redis.ping();
+  }
+}
+```
+
+### Graceful shutdown
+
+```tsx
+// main.ts
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  app.enableShutdownHooks();
+
+  const server = await app.listen(process.env.PORT ?? 3000);
+
+  const shutdown = async (signal: string) => {
+    logger.log(`Received ${signal}. Starting graceful shutdown...`);
+
+    server.close(() => {
+      logger.log('HTTP server closed');
+    });
+
+    // Give in-flight requests 10 seconds to complete
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10_000);
+
+    await app.close();
+    logger.log('Application shutdown complete');
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+```
+
+Graceful shutdown matters because without it, deploying a new version kills in-flight requests. Users see 502 errors. Database transactions are left in an inconsistent state. Queue messages are lost. The 10-second grace period lets existing requests finish while new requests are routed to the new instance.
+
+## Background Jobs
+
+For anything that takes more than a few hundred milliseconds — sending emails, generating PDFs, processing webhooks — use a background job queue. I use BullMQ with Redis.
+
+```tsx
+// lib/queue/invoice-jobs.processor.ts
+@Processor('invoices')
+export class InvoiceJobsProcessor {
+  private readonly logger = new Logger('InvoiceJobs');
+
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly pdfService: PdfService,
+  ) {}
+
+  @Process('send-invoice')
+  async handleSendInvoice(job: Job<{ invoiceId: string }>) {
+    this.logger.log(`Processing send-invoice job ${job.id}`);
+
+    const pdf = await this.pdfService.generateInvoicePdf(job.data.invoiceId);
+    await this.emailService.sendInvoice(job.data.invoiceId, pdf);
+
+    this.logger.log(`Completed send-invoice job ${job.id}`);
+  }
+
+  @OnQueueFailed()
+  onFailed(job: Job, error: Error) {
+    this.logger.error(
+      `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
+    );
+  }
+}
+```
+
+```tsx
+// In a service, enqueue the job
+@Injectable()
+export class InvoicesService {
+  constructor(
+    @InjectQueue('invoices') private readonly invoiceQueue: Queue,
+  ) {}
+
+  async sendInvoice(invoiceId: string) {
+    await this.invoiceQueue.add('send-invoice', { invoiceId }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    });
+  }
+}
+```
+
+<Tip>
+Always configure retries with exponential backoff. Always set `removeOnComplete` and `removeOnFail` to prevent Redis from growing unbounded. Always log job failures with enough context to debug them.
+</Tip>
+
+## Request/Response Typing End-to-End
+
+The final pattern ties everything together. When your API responses are typed, your frontend can consume them with full type safety.
+
+```tsx
+// shared/types/api.ts (shared between frontend and backend)
+export interface ApiResponse<T> {
+  data: T;
+  meta?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface ApiError {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+  correlationId?: string;
+}
+
+// shared/types/invoice.ts
+export interface InvoiceDto {
+  id: string;
+  invoiceNumber: string;
+  status: 'DRAFT' | 'SENT' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+  client: ClientDto;
+  lineItems: LineItemDto[];
+  totalCents: number;
+  currency: string;
+  dueDate: string;
+  createdAt: string;
+}
+```
+
+The backend returns `ApiResponse<InvoiceDto>`. The frontend consumes `ApiResponse<InvoiceDto>`. Same type, same shape, enforced at compile time on both ends. If you change the shape on one side, the other side fails to compile. That's the promise of full-stack TypeScript — and these patterns are how you actually deliver on it.
