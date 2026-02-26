@@ -1,49 +1,20 @@
-/* Custom CSS to increase logo size in Mintlify */
-/* Keep the logo large on desktop but shrink it on small screens so it
-   doesn't overlap the mobile hamburger/menu toggle. */
 nav a[href="/"] img,
 nav a[href="/"] svg,
 header a[href="/"] img,
 header a[href="/"] svg,
 a[href="/"] img,
-a[href="/"] svg {
-  height: 150px !important;
-  width: auto !important;
-  max-width: 350px !important;
-  margin-left: -3px !important;
-  margin-top: 5px !important;
-}
-
-/* Alternative selectors for Mintlify logo */
+a[href="/"] svg,
 [data-testid="logo"] img,
 [data-testid="logo"] svg,
 .logo img,
-.logo svg {
-  height: 150px !important;
-  width: auto !important;
-  max-width: 350px !important;
-  margin-left: -3px !important;
-  margin-top: 5px !important;
-}
-
-/* More specific selectors */
+.logo svg,
 nav>a>img,
-nav>a>svg {
-  height: 150px !important;
-  width: auto !important;
-  max-width: 350px !important;
-  margin-left: -3px !important;
-  margin-top: 5px !important;
-}
-
-/* Target any image in the first nav link */
+nav>a>svg,
 nav a:first-child img,
 nav a:first-child svg {
-  height: 150px !important;
+  height: 70px !important;
   width: auto !important;
-  max-width: 350px !important;
-  margin-left: -3px !important;
-  margin-top: 5px !important;
+  max-width: 200px !important;
 }
 
 @media (max-width: 768px) {
@@ -62,9 +33,7 @@ nav a:first-child svg {
   nav>a>svg,
   nav a:first-child img,
   nav a:first-child svg {
-    height: 120px !important;
-    max-width: 160px !important;
-    margin-left: 0 !important;
-    margin-top: 0 !important;
+    height: 50px !important;
+    max-width: 140px !important;
   }
 }

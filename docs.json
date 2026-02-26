@@ -1,10 +1,10 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "palm",
-  "name": "helloavi",
+  "name": "slashAvi.sh",
   "logo": {
-    "light": "/images/lg1.png",
-    "dark": "/images/lg1.png"
+    "light": "/images/logo.png",
+    "dark": "/images/logo.png"
   },
   "tagline": "Build. Think. Write.",
   "colors": {
@@ -12,7 +12,7 @@
     "light": "#ff3131",
     "dark": "#ff3131"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/images/logo.png",
   "stylesheets": ["/custom.css"],
   "styling": {
     "eyebrows": "breadcrumbs"
@@ -249,7 +249,7 @@
     "links": [
       {
         "label": "Email me",
-        "href": "mailto:mail.helloavi.sh@gmail.com"
+        "href": "mailto:slashAvi.sh@gmail.com"
       }
     ]
   },
