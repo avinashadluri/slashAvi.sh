@@ -17,6 +17,16 @@ nav a:first-child svg {
   max-width: 200px !important;
 }
 
+.dark nav a[href="/"] img,
+.dark header a[href="/"] img,
+.dark a[href="/"] img,
+.dark [data-testid="logo"] img,
+.dark .logo img,
+.dark nav>a>img,
+.dark nav a:first-child img {
+  filter: brightness(0) invert(1) !important;
+}
+
 @media (max-width: 768px) {
 
   nav a[href="/"] img,
