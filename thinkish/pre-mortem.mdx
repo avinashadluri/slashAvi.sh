@@ -1,0 +1,127 @@
+---
+title: "Pre-Mortem — Deep Dive"
+description: "Imagine the project has already failed. Now explain why. The most underused tool in engineering and product."
+---
+
+> _"The pre-mortem is the only widely used management technique that explicitly asks people to think like a pessimist."_ — Gary Klein (psychologist who formalized the technique)
+
+A post-mortem happens after something fails. You gather evidence, find root causes, and write up a report that mostly confirms what everyone suspected.
+
+A pre-mortem happens before something starts. You imagine it has already failed — completely, publicly, painfully — and then work backwards to explain why.
+
+The difference is not just timing. It is epistemological. A post-mortem is forensics. A pre-mortem is prediction, which is much harder and much more valuable.
+
+This is a deep-dive companion to the [frameworks overview](/thinkish/frameworks).
+
+---
+
+## What It Is (Precisely)
+
+Gary Klein, the psychologist who formalized the pre-mortem technique, describes it as "prospective hindsight." Humans are much better at explaining why something happened than predicting whether it will happen. The pre-mortem exploits this by manufacturing the "it happened" state and letting your brain do what it's good at: explaining.
+
+The mechanics:
+1. Set the context: "It's 6 months from now. This project has failed. Not just 'underperformed' — genuinely, obviously failed."
+2. Ask everyone in the room (or yourself, if working solo): "What went wrong? Why did this fail?"
+3. Collect all the reasons without judgment
+4. Group them by theme
+5. For each theme: Is this risk visible in our current plan? What would we do differently?
+
+The key is the frame: **it has already failed**. Not "could fail" — has failed. This releases people from the social pressure to be positive about the plan, because the plan is already dead. You're just doing forensics.
+
+---
+
+## The Team Pre-Mortem: Feature Launch at Weel
+
+Before launching a major AI-powered feature at Weel, I ran a 30-minute pre-mortem with the team. Here is what we said.
+
+**Context given to the room:** "It's four months from now. The feature is live and has been for six weeks. We've had three P1 incidents, adoption is at 12% of target, and leadership is asking whether to pull it. What went wrong?"
+
+**What the team said (grouped):**
+
+*Category: User adoption*
+- We didn't validate with real users before building — we validated with internal proxies who don't represent the actual workflow
+- The onboarding flow assumed too much context; real users were confused by step 3 and dropped off
+- We launched to all customers at once instead of a controlled cohort; we couldn't isolate what was working
+
+*Category: Technical reliability*
+- The LLM call latency was higher than we expected under real load; we'd tested with clean inputs, not the messy real-world data
+- We had no circuit breaker for the external API — when it degraded, the whole feature degraded with it
+- The error states surfaced raw API errors to users; not a P1 but visually terrible
+
+*Category: Team and process*
+- The PM who owned user research left before launch; we lost institutional knowledge about the user context
+- We didn't have a rollback plan that the on-call team could execute without the engineers who built it
+- Three engineers had context on the most complex parts; none of them were the on-call that week
+
+**What we changed:**
+- Ran two weeks of user research with actual customers before finalizing the feature spec
+- Built a circuit breaker and a graceful degradation mode (feature goes read-only if the API is slow)
+- Created a runbook that anyone on the on-call rotation could follow, tested by someone who didn't build the feature
+- Launched to a 5% cohort first, with weekly adoption reviews before expanding
+
+The feature launched without a P1. Adoption hit 67% of target in the first six weeks — lower than planned but far better than what the pre-mortem had shown us we were headed for without changes.
+
+---
+
+## The Solo Pre-Mortem: Starting MetaLabs
+
+When I decided to start MetaLabs as a side project, I ran a pre-mortem on my own. The question: "It's two years from now. MetaLabs is dead. I shut it down. Why?"
+
+**My reasons:**
+
+- I ran out of focused time — got too busy at the day job and never protected weekend build time
+- I tried to build too many things in parallel and shipped nothing properly
+- I didn't get early users fast enough; built for 9 months and then found out nobody wanted it the way I'd built it
+- I burned out because the work stopped feeling like play and started feeling like a second job
+- I underinvested in distribution — assumed the product would market itself
+
+**What I changed before starting:**
+- Created a "MetaLabs Saturday" rule — 4 hours, protected, non-negotiable
+- Committed to shipping v1 of each product in under 8 weeks before starting the next
+- Set a personal rule: if a product has no external user in 12 weeks, it's either pivoted or killed
+- Started writing [publicly about what I was building](/now) from day one — distribution baked in, not bolted on
+
+MetaLabs is still running. Some products haven't worked. But none have failed for the reasons I identified in the pre-mortem.
+
+---
+
+## The 30-Minute Workshop Format
+
+Here is the exact format I use with teams. It works for 4-12 people. Over 12, split into sub-groups.
+
+| Time | Activity |
+|---|---|
+| 0-5 min | Set context. Read the "it has failed" scenario aloud. Be vivid — name the consequences. |
+| 5-15 min | Silent brainstorm. Everyone writes their failure reasons independently. No discussion yet. |
+| 15-22 min | Round-robin sharing. Each person reads one item at a time, no repeats. Facilitator captures on a shared surface. |
+| 22-27 min | Group by theme. Identify the top 3-5 clusters. |
+| 27-30 min | Prioritize. Which of these risks is present in the current plan? What changes? |
+
+**The silent brainstorm is non-negotiable.** If you skip it and go straight to group discussion, the loudest voices dominate and you'll get a subset of the risks. People have different knowledge. The silent step surfaces the long tail.
+
+**The "vivid" instruction matters.** "It failed" is too abstract. "The CEO asked us to do a public retrospective at the all-hands. The slide shows that we missed the launch date by 3 months and the feature has 8% adoption. Your names are on the project." That is vivid. Vivid makes the brain produce better predictions.
+
+---
+
+## The Trap: Using It Too Late
+
+Pre-mortems only work before commitments are made. If you run one after the architecture is decided, the code is half-written, or the announcement has been made — people's failure modes will be shaped by what has already been built. Confirmation bias will filter the list.
+
+**Run it:**
+- Before the design is approved
+- Before the sprint starts
+- Before the decision is announced
+- Before the contract is signed
+
+**Not:**
+- After the team has already bought in emotionally
+- When there's no time to change anything
+- As a rubber-stamp exercise
+
+If a pre-mortem isn't allowed to change the plan, it's not a pre-mortem — it's theatre.
+
+---
+
+<Note>
+Pre-mortem pairs with [Inversion](/thinkish/inversion) — both are failure-first approaches. The difference: Inversion is a list of failure modes. Pre-mortem is a narrative simulation. Both surfaces different kinds of risk. The [decision journal](/thinkish/decision-journal) has examples of both in practice.
+</Note>

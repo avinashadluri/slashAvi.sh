@@ -1,0 +1,107 @@
+---
+title: "What I Killed — and Why"
+description: "A record of products and features I built, shipped, and then deliberately killed. What each one taught me."
+---
+
+> _Killing a product you built is harder than it looks. It looks like giving up. It is usually the opposite._
+
+Most build diaries celebrate what worked. This one is about what didn't — and the specific moment when I decided to stop.
+
+These are not failures I'm embarrassed about. They are the most expensive lessons I've paid for, and the only waste would be not writing them down.
+
+---
+
+## 1. ScheduleKit (2019) — a scheduling automation tool
+
+**What it was:** A SaaS tool for automating team scheduling and leave management for small companies (10-50 people). Built in response to a pain I had as a team lead: managing leave requests in Slack was chaos.
+
+**The build:** Four months of weekends. Next.js frontend, Node backend, Google Calendar integration, Slack bot. I was proud of the code. It was clean, well-tested, and genuinely solved the problem I had.
+
+**The signal it wasn't working:**
+- Signed up 11 companies in beta
+- 9 of them stopped using it within 6 weeks
+- The 2 who kept using it were using it in ways I hadn't built for
+
+**The honest reason I built it:** I built it because I wanted to build something, not because I'd validated the market. I assumed other team leads had my exact problem. They had similar problems, but not the same one. My problem was a symptom of a bad process. They needed process help, not scheduling tools.
+
+**When I killed it:** Month 7, after I spent a full weekend adding a feature that one beta user had requested and then saw their usage drop the following week anyway.
+
+**What it taught me:** Solve for the problem, not the symptom. Interview users before you write a line of code. "I would use that" is not the same as "I will use that."
+
+---
+
+## 2. A Daily Habit Tracking App (2021) — unnamed
+
+**What it was:** A minimal habit tracker. I was frustrated with existing apps being too gamified, too complex, or too ugly. I wanted something calm and private, no streaks, no badges, no social features.
+
+**The build:** Six weeks. React Native for iOS and Android. Local storage only — no server, no account. Three screens. Very clean.
+
+**The signal it wasn't working:**
+- Shipped to App Store (free)
+- Got 340 downloads in the first month from a single mention in a newsletter
+- Had 12 active users after 60 days
+- I was not one of them
+
+**The honest reason I built it:** I wanted to learn React Native. I should have admitted that and built something deliberately educational, not something I was pretending would become a real product.
+
+**When I killed it:** Three months after launch, when I found myself adding features to avoid confronting the fact that I wasn't the user I thought I was.
+
+**What it taught me:** "I wish this existed" is a building motivation, not a product validation. If you're not your own active user, you're building on a hypothesis, not evidence.
+
+---
+
+## 3. A Startup Feature — Bayesian Skill Matching (2022)
+
+**What it was:** This one wasn't my product — it was a feature I championed at a company I was consulting for. A Bayesian model for matching engineers to tasks based on their skill signal from code reviews, PR history, and ticket resolution.
+
+I was convinced this would be the most impactful thing the engineering team could build. I wrote the proposal. I got it approved. I led the build.
+
+**The signal it wasn't working:**
+- Shipped to internal alpha users (engineers in the company)
+- The model worked technically — predictions were measurably better than random assignment
+- Engineers hated it. Not "didn't prefer it." Hated it.
+- The principal complaint: "It makes me feel like a resource, not a person."
+
+**When I killed it:** Two weeks after launch. No debate. The emotional signal was clear enough.
+
+**What it taught me:** Technically correct solutions can be people-wrong. The problem with optimization tools applied to humans is that humans experience the optimization. Efficiency gains are invisible to the people being made efficient. The psychological cost is not.
+
+This one still stings. I was solving the right problem (task allocation was genuinely inefficient) with the wrong solution (making the inefficiency visible to the people causing it). The right solution was a process change, not a tool.
+
+---
+
+## 4. The Productivity Dashboard (2023)
+
+**What it was:** An aggregated personal productivity dashboard — pulling in data from Toggl, Notion, GitHub, and a custom sleep tracker. A single screen showing energy, output, and focus quality across the week.
+
+**The build:** Three months. Vercel, Next.js, a tangle of OAuth integrations, Recharts for visualization. Genuinely one of the most satisfying builds I've done technically.
+
+**The signal it wasn't working:** It worked. I used it for four months. Then I noticed I was checking the dashboard more than I was working. The act of tracking had become the activity, not the signal.
+
+**When I killed it:** I deleted the dashboard on a Tuesday morning when I realized I'd spent 45 minutes reviewing my productivity metrics instead of doing the work they were supposed to be measuring.
+
+**What it taught me:** Measurement and action are not the same thing. Some systems you build as products; some you build to learn something and then stop. The dashboard taught me my peak focus windows (Tuesday/Wednesday mornings) and my energy patterns. I use that knowledge. I don't need the dashboard anymore.
+
+This is the kill I'm most at peace with. It worked, it was useful, and it ended when it had taught me what it could.
+
+---
+
+## The Pattern Across All Four
+
+Looking at what I killed, the common threads:
+
+1. **I built before I validated** — ScheduleKit and the habit app both came from "I have this problem" without "and others have this exact problem in this exact form."
+
+2. **I confused technical success with product success** — The skill matching feature worked perfectly by the metric I'd defined. It failed by the metric that mattered.
+
+3. **I was slow to act on clear signals** — In each case, I knew something was wrong 2-4 weeks before I killed it. I spent that time adding features instead of accepting the evidence.
+
+The discipline I've built since: **set a kill condition before you start.** Before I build anything now, I write a sentence: "This is dead if [specific measurable condition] by [specific date]." When the condition is met, I execute without debate.
+
+It removes the emotion from the decision. The decision was already made.
+
+---
+
+<Note>
+See the [Thinki.sh build diary](/products/thinki-build-diary) for a case study of a product that survived these same forces. The [pre-mortem framework](/thinkish/pre-mortem) is how I now surface kill conditions before I start.
+</Note>

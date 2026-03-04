@@ -1,0 +1,95 @@
+---
+title: "Thinki.sh — Build Diary"
+description: "Why I built a preventive thinking tool, what v1 got wrong, how v2 changed, and where it's going."
+---
+
+> _The best products come from problems you've lived so long you stopped noticing them. Thinki.sh came from a problem I'd been living for ten years._
+
+This is not a launch post. It's a build diary — a record of what I learned building Thinki.sh, including the parts that didn't work.
+
+---
+
+## The Problem
+
+In 2020, I became a tech lead for the first time. I had the technical skills. I did not have the leadership skills — specifically, the ability to see problems coming before they arrived.
+
+I kept being surprised. A team member would burn out — and in retrospect, the signs had been there for six weeks. A project would slip its deadline — and in retrospect, the dependency risks were visible from the planning document. A technical decision would create production incidents six months later — and in retrospect, the second-order effects were predictable.
+
+I wasn't making bad decisions. I was making decisions with incomplete analysis. I'd arrive at the right answer through intuition and then stop, when I should have kept asking questions.
+
+I wanted a system. Something that would prompt me to ask the questions I kept forgetting to ask. A thinking workout, not a note-taking app.
+
+That became the seed of Thinki.sh.
+
+---
+
+## v1: What I Built and Why It Didn't Work
+
+V1 was a collection of canvases. Think Figma templates but for thinking — structured worksheets you could fill in before a big decision or project kickoff. I built 12 of them covering:
+- Project pre-mortems
+- Career decision analysis
+- Product strategy reviews
+- Team health checks
+- Architecture trade-off mapping
+
+**The stack:** Next.js, Tailwind, MDX-based canvas content, deployed on Vercel. Simple. Fast. Printable.
+
+**What I shipped:** The worksheets worked well in workshops. I ran 4 live sessions where I walked teams through them. Feedback was positive.
+
+**What didn't work:** Nobody used them independently. Without me facilitating, the canvases sat unused. I'd built a workshop tool, not a product.
+
+The insight I missed: thinking frameworks are useless without the activation energy to start them. People don't open a blank canvas unprompted. They need a context — a decision they're stuck on, a project that's going sideways — and then they need something that meets them there.
+
+I'd built supply without triggering demand.
+
+---
+
+## The Pivot Between v1 and v2
+
+I spent three months not building. Instead, I watched how I actually used the frameworks in my own work.
+
+The pattern: I never opened the canvas. I used the frameworks in conversation — with myself, in my [decision journal](/thinkish/decision-journal), or in ad-hoc writing. The trigger was never "I should use a framework." It was "I'm stuck on this problem."
+
+**So the question became:** What if Thinki.sh met you at the moment of being stuck, instead of waiting for you to remember to open it?
+
+That became the v2 hypothesis: an AI-assisted thinking coach that responds to the problem you're in, not the problem you've scheduled.
+
+---
+
+## v2: What Changed
+
+V2 introduced an AI coaching layer. You describe the decision you're facing or the project you're worried about, and the system:
+
+1. Identifies which frameworks are most relevant
+2. Asks you the questions you need to answer (not a generic canvas — specific questions for your situation)
+3. Synthesizes your answers into a structured output you can act on
+
+**The stack evolution:**
+- Added Claude (Anthropic's API) as the reasoning layer
+- Vercel AI SDK for streaming responses
+- Supabase for user sessions and saved analyses
+- Tiptap for rich-text response editing
+
+**What got better:** Activation energy problem largely solved. When you're stuck, you describe the problem in plain text. The system asks good questions. You think out loud. The output is useful.
+
+**What's still hard:** The quality of the coaching depends on how well you describe your problem. Users who are good at articulating their situation get great value. Users who give vague inputs get generic outputs. I'm still working on the prompt layer that helps people describe their situation better.
+
+---
+
+## What's Next
+
+Three things I'm exploring for v3:
+
+1. **Pattern recognition across your own decisions** — If I can see your last 20 decisions, I can start surfacing where your blind spots are. "You consistently underestimate rollout complexity" is more valuable than any single framework.
+
+2. **Team mode** — The pre-mortem workshop format works best with a team. A collaborative mode where multiple people contribute to the same analysis, asynchronously.
+
+3. **Integration with where you actually work** — The thinking should happen in Linear, in Notion, in Slack — not in a separate app. This is a distribution problem as much as a product problem.
+
+---
+
+<Info>
+The frameworks underlying Thinki.sh are documented in [Thinkish](/thinkish/intro). The deep-dives on [First Principles](/thinkish/first-principles), [Inversion](/thinkish/inversion), and [Pre-Mortem](/thinkish/pre-mortem) are the intellectual core of the product.
+</Info>
+
+_Last updated: March 2026_

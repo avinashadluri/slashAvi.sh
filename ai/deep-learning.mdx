@@ -1,34 +1,60 @@
 ---
-title: "Deep Learning Notes"
-description: "From CNN/RNN essentials to foundation model fine-tuning in the AI Lab."
+title: "How I Use Deep Learning in Production"
+description: "Practitioner notes — when I reach for deep learning, what stack I use, and what I've learned."
 ---
 
+> _I'm a practitioner, not a researcher. These notes reflect applied use, not a survey of the field._
 
-These are the patterns I reuse when moving from classical ML to deep learning workloads.
+I reach for deep learning when classical ML hits a ceiling — usually because the input is unstructured (images, audio, long text) or because I need representational power that tabular models don't provide. In practice, this means I'm almost always using fine-tuned foundation models, not training from scratch.
 
-## 1. Core Architectures
-- **CNNs**: still relevant for document layout parsing + GlucosePro image analysis.
-- **RNNs/GRUs**: used sparingly; prefer Transformers even for sequences.
-- **Transformers**: default for language + multimodal experiments.
+---
 
-## 2. Training Stack
-- **Frameworks**: PyTorch Lightning + Hugging Face Accelerate.
-- **Compute**: RunPod + Lambda Labs for spot GPU; on-prem for sensitive data.
-- **Experiment tracking**: Weights & Biases, MLflow for metadata.
+## What I Actually Need to Understand
 
-## 3. Fine-Tuning Strategy
-1. Start with adapter/LoRA to reduce cost.
-2. Use domain-specific datasets (Thinki.sh prompts, productivity transcripts).
-3. Evaluate with targeted benchmarks (guardrail dataset, task-specific metrics).
-4. Distill into smaller models for edge deployment when needed.
+- **When fine-tuning beats prompting** — For domain-specific, high-volume tasks where consistent output format matters, a fine-tuned model is often cheaper and more reliable than a well-prompted base model. For flexibility and low-volume tasks, prompting wins.
+- **LoRA vs full fine-tuning** — For most use cases I've worked on, LoRA (low-rank adaptation) is the right choice. It's fast, cheap, and the quality delta vs full fine-tuning is negligible when the dataset is under 100k examples.
+- **Evaluation before training** — I spend more time defining my evaluation dataset than I spend running training jobs. The training is automatic; the evaluation is where the judgment lives.
 
-## 4. Multimodal Experiments
-- Image + text journaling for productivity dashboards.
-- Audio + text for Nishabdham recitals (Whisper + GPT-4o audio).
+---
 
-## 5. Responsible AI Hooks
-- Dataset audits, bias checks.
-- Red-team prompts documented alongside releases.
-- Human-in-the-loop review for new models touching finance/health.
+## The Tools I Use and Why
 
-See the Generative AI page for agent-centric workflows.
+| Task | Tool | Reason |
+|---|---|---|
+| Language fine-tuning | Hugging Face + LoRA | Widest model access; LoRA keeps compute cost manageable |
+| Computer vision | PyTorch + Ultralytics (YOLO) | Strong defaults for detection; easy to deploy |
+| Audio transcription | Whisper | Best accuracy on accented/bilingual speech I've tested |
+| Training infrastructure | RunPod spot GPUs | ~60% cheaper than AWS for short training runs |
+| Experiment tracking | Weights & Biases | Visual comparison of training runs |
+| Distillation | llama.cpp + GGUF | For shrinking models to edge-compatible sizes |
+
+---
+
+## One Concrete Example: Nishabdham Audio + Text
+
+For Nishabdham, I've been experimenting with audio renditions of Telugu poetry — recording the poems and generating aligned bilingual subtitles.
+
+The pipeline:
+1. Record audio (natural reading, not synthesized)
+2. Whisper (large-v3) for transcription — handles Telugu natively with ~92% accuracy
+3. Forced alignment via `stable-ts` to get word-level timestamps
+4. Auto-generate SRT with both Telugu text and English context notes
+5. Manual review pass (always — the last 8% of errors are culturally significant, not just phonetic)
+
+What surprised me: Whisper's Telugu accuracy was far better than I expected, but it struggles with code-switched sentences (Telugu with English tech words). I've built a post-processing step that normalizes common code-switch patterns before final export.
+
+---
+
+## What I Learned the Hard Way
+
+**1. Don't fine-tune what you can prompt.** I spent two weeks fine-tuning a model for a classification task that a well-structured prompt on Claude handled in a day. Prompting should always be the first attempt.
+
+**2. Evaluation data is the asset.** The fine-tuned model becomes worthless when the base model is updated. The evaluation dataset is yours forever. Invest in building it carefully — it's the thing that tells you whether any model (fine-tuned or not) is doing the right thing.
+
+**3. Multimodal is harder than it looks in demos.** Image + text understanding in production hits edge cases that demos are designed to avoid. Real user images are blurry, poorly lit, and rotated. Test on real inputs before committing to a multimodal approach.
+
+---
+
+<Note>
+For classical ML patterns see [Machine Learning](/ai/machine-learning). For LLM-based workflows see [Generative AI](/ai/generative-ai) and [Building RAG Systems](/ai/building-rag-systems).
+</Note>
