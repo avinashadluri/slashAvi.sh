@@ -1,35 +1,65 @@
-title: "AI Lab · Machine Learning Foundations"
-description: "How I approach classical ML inside the AI Lab stack."
+---
+title: "How I Use Machine Learning in Production"
+description: "Practitioner notes on classical ML — what I actually use, why, and what I've learned the hard way."
 ---
 
-# Machine Learning Foundations
+> _I'm a practitioner, not a researcher. These notes reflect applied use across real products, not a full ML curriculum._
 
-Even in an LLM world, classical ML powers plenty of AI Lab workflows. Here’s the playbook.
+Classical ML still powers significant parts of what I build — even in an LLM-first world. Here's what I actually reach for, and why.
 
-## 1. Problem Framing
-- Define **Decision Surface**: what action/outcome are we predicting?
-- Capture **Data Reality**: source, volume, freshness, labeling cost.
-- Identify **Success Metric**: accuracy, F1, RMSE, cost savings.
+---
 
-## 2. Dataset Ops
-- **Ingest**: Airbyte → BigQuery, version via LakeFS.
-- **Label**: Snorkel + human-in-the-loop in Label Studio.
-- **Split**: Temporal splits for time series, stratified for classification.
-- **Data cards**: Document biases, schema, owners.
+## What I Actually Need to Understand (Not a Full Curriculum)
 
-## 3. Modeling Stack
-- Tabular: CatBoost, XGBoost with Optuna tuning.
-- Time-series: Prophet + Nixtla NeuralForecast.
-- Recommendation: implicit matrix factorization + rerank via embeddings.
+After building ML features into Thinki.sh, AviWealth, and GlucosePro, I've found that a working engineer needs to understand:
 
-## 4. Deployment
-- Package models with BentoML, deploy to AWS Lambda / ECS.
-- Monitor with Evidently AI; send drifts to Slack.
-- Build guardrails: auto-disable if metrics degrade beyond threshold.
+- **When to use ML vs rules vs an LLM** — ML shines when you have labeled data and want to optimize a specific, narrow prediction. Rules are better when the logic is human-readable and needs to be auditable. LLMs are better when the input is unstructured text and precision matters less than flexibility.
+- **What your data actually looks like** — most ML failures I've seen are data problems masquerading as model problems.
+- **How to evaluate a model honestly** — accuracy is usually the wrong metric. What you optimize depends on the cost of false positives vs false negatives.
 
-## 5. Use Cases
-- Productivity habit scoring.
-- AviWealth cashflow anomaly detection.
-- Thinki.sh challenge recommendations.
+---
 
-Pair this doc with the Generative AI playbook for hybrid systems.
+## The Tools I Use and Why
+
+| Problem | Tool | Reason |
+|---|---|---|
+| Tabular prediction | CatBoost | Handles mixed types well; minimal preprocessing needed |
+| Time-series forecasting | Prophet + NeuralForecast | Good defaults; covers both classical and neural paths |
+| Anomaly detection | Isolation Forest | Fast, interpretable, works with limited labeled data |
+| Recommendation | Implicit matrix factorization | Strong baseline before over-engineering |
+| Data versioning | LakeFS | Reproducibility without a full data platform |
+| Experiment tracking | Weights & Biases | Better than MLflow for small teams |
+| Model serving | BentoML → AWS Lambda | Low-ops path from model to endpoint |
+| Monitoring | Evidently AI | Drift detection with minimal setup |
+
+---
+
+## One Concrete Example: AviWealth Cashflow Anomaly Detection
+
+AviWealth's core feature is a cashflow analysis tool for immigrants navigating Australian finances. Part of that is flagging unusual spending patterns — months where something is significantly off from the user's baseline.
+
+The naive approach: flag anything above 2 standard deviations from mean. This fires too often (normal variance triggers it) and misses compound anomalies (three medium-unusual months in a row).
+
+What I used:
+- **Features**: rolling 30-day spend by category, vs 90-day baseline, vs seasonal baseline
+- **Model**: Isolation Forest (anomaly detection, not classification — I didn't have labeled "anomalous" months)
+- **Threshold tuning**: set based on user feedback from 20 beta users, not on model metrics alone
+- **Deployment**: BentoML-packaged, running as a Lambda that fires on monthly aggregation
+
+The model runs in 120ms per user per month. False positive rate in beta was 8% — users accepted it. One user found a fraudulent direct debit through the alert.
+
+---
+
+## What I Learned the Hard Way
+
+**1. Start with a rule, then upgrade to a model.** My first pass at the anomaly detector was a simple rule: "flag if this month's spend is 40% above the 3-month average." It caught 70% of what the model catches and took a day to build. The model took 3 weeks. For most use cases, the rule is good enough to ship and learn from.
+
+**2. Monitor drift from day one.** I didn't set up Evidently until 3 months in. By that point, the model had silently degraded because user spending patterns shifted after I changed the categorization logic. If I'd had drift monitoring from launch, I'd have caught it in week 2.
+
+**3. The model is not the product.** The model produces a score. The product is what you do with the score — the UI, the notification, the explanation. I spent 3 weeks improving model accuracy and 3 days improving how the alert was displayed. The user experience improvement from the UI work was 5x more impactful for adoption.
+
+---
+
+<Note>
+For LLM-based workflows, see [Generative AI](/ai/generative-ai) and [Building RAG Systems](/ai/building-rag-systems). For how ML and LLMs combine in production, see [Shipping AI Features](/ai/shipping-ai-features).
+</Note>

@@ -24,11 +24,11 @@
         "groups": [
           {
             "group": "Welcome",
-            "pages": ["introduction"]
+            "pages": ["introduction", "how-it-works"]
           },
           {
             "group": "About Me",
-            "pages": ["about/professional", "about/personal", "now"]
+            "pages": ["about/professional", "about/personal", "about/immigrant-engineer", "now"]
           },
           {
             "group": "Social",
@@ -37,6 +37,10 @@
           {
             "group": "Products",
             "pages": ["products"]
+          },
+          {
+            "group": "Build Stories",
+            "pages": ["products/thinki-build-diary", "products/what-i-killed"]
           }
         ]
       },
@@ -141,7 +145,7 @@
         "tab": "AI",
         "groups": [
           {
-            "group": "AI & Machine Learning",
+            "group": "My AI Stack",
             "pages": [
               "ai/machine-learning",
               "ai/deep-learning",
@@ -270,6 +274,14 @@
             "pages": ["thinkish/intro", "thinkish/frameworks", "thinkish/action-plan"]
           },
           {
+            "group": "Framework Deep-Dives",
+            "pages": [
+              "thinkish/first-principles",
+              "thinkish/inversion",
+              "thinkish/pre-mortem"
+            ]
+          },
+          {
             "group": "Tools & Practices",
             "pages": ["thinkish/decision-journal", "thinkish/mental-models-engineering"]
           }
@@ -284,11 +296,11 @@
           },
           {
             "group": "📕 కథలు",
-            "pages": ["nishabdham/kathalu"]
+            "pages": ["nishabdham/kathalu", "nishabdham/naa-gudi"]
           },
           {
             "group": "📙 ఆధునిక కవిత్వం",
-            "pages": ["nishabdham/adhunika-kavithvam"]
+            "pages": ["nishabdham/adhunika-kavithvam", "nishabdham/kavitalu"]
           },
           {
             "group": "📗 రేవనలిజం",
@@ -301,6 +313,14 @@
           {
             "group": "🧑‍💼 అవిభక్తం",
             "pages": ["nishabdham/avibhaktam"]
+          },
+          {
+            "group": "✨ ప్రేరణ",
+            "pages": ["nishabdham/prerana"]
+          },
+          {
+            "group": "💭 ఆలోచనలు",
+            "pages": ["nishabdham/alochanalu"]
           },
           {
             "group": "🧵 జ్ఞానం",

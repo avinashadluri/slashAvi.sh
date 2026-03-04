@@ -1,32 +1,68 @@
 ---
-title: "Computer Vision Notes"
-description: "How vision models support productivity health tracking, content creation, and documentation."
+title: "How I Use Computer Vision in Production"
+description: "Practitioner notes on vision models — where I've used them, what worked, and what surprised me."
 ---
 
+> _I'm a practitioner, not a researcher. These notes reflect applied use on real products. Vision is not my primary domain — but it keeps showing up in things I build._
 
-Vision quietly supports many Avi projects—from GlucosePro charts to YouTube content.
+---
 
-## 1. Document & UI Parsing
-- **Tools**: LayoutLMv3 + Donut for parsing invoices, statements, and design mocks.
-- **Use case**: AviWealth uploads, extracting data into Notion + Sheets.
+## Where Vision Actually Shows Up
 
-## 2. Health & Wellness
-- **Glycemic logging**: Use OCR (Tesseract) to capture readings; cross-check with manual entries.
-- **Meal logging**: YOLOv8 models classify meal types for nutrition analysis.
+Computer vision wasn't something I planned to work with. It found me through the problems I was trying to solve:
 
-## 3. Content Automation
-- **Storyboarding**: Detect key frames from footage to auto-generate thumbnails.
-- **Subtitle alignment**: Whisper + gentle forced alignment for bilingual subtitles on Nishabdham videos.
+- **GlucosePro** — Users wanted to photograph their CGM (continuous glucose monitor) readings instead of typing them
+- **AviWealth** — Document parsing: uploading bank statements and having the system extract structured data
+- **Nishabdham** — Generating visual content from poem text; key frame extraction for video recitals
 
-## 4. Tooling Stack
-- Python + FastAPI microservices.
-- Runs on Modal / RunPod GPUs when heavy, Cloudflare Workers w/ WebAssembly for lightweight filters.
-- Monitoring via Evidently (image drift) + Sentry.
+In each case, I didn't choose vision because I wanted to work with vision. I chose it because the user's natural input was visual, and fighting that was worse than building for it.
 
-## 5. Getting Started Template
-1. Collect dataset (images, annotations via Label Studio).
-2. Train/fine-tune with Ultralytics or Detectron2.
-3. Deploy via BentoML; expose restful endpoint.
-4. Wire into productivity automations or AI Lab agents.
+---
 
-Share improvements or datasets—vision is a team sport.
+## The Tools I Use and Why
+
+| Task | Tool | Reason |
+|---|---|---|
+| Document/invoice parsing | LayoutLMv3 + Donut | Purpose-built for structured document extraction |
+| OCR (clean text) | Tesseract | Fast, free, good enough for high-contrast text |
+| Object detection | YOLOv8 (Ultralytics) | Best defaults-to-deployment ratio I've found |
+| Image classification | CLIP zero-shot | When I don't have labeled training data yet |
+| Key frame extraction | PySceneDetect | Good enough for thumbnail generation |
+| Subtitle alignment | Whisper + stable-ts | For bilingual subtitle generation on video content |
+| Deployment | Modal (GPU) + Cloudflare Workers (WASM) | GPU for training/heavy inference; WASM for lightweight edge filters |
+
+---
+
+## One Concrete Example: GlucosePro CGM Reading Capture
+
+The user flow I wanted: photograph the CGM device screen → extract the reading → log it with timestamp.
+
+The challenge: CGM screens vary by device, the text is small and sometimes against a curved surface, and users photograph them in all lighting conditions.
+
+What I built:
+1. **Preprocessing**: Detect the device screen within the photo (YOLOv8 fine-tuned on ~400 labeled images of CGM devices)
+2. **Crop and enhance**: Crop to the screen region, apply contrast enhancement
+3. **OCR**: Tesseract on the enhanced crop to extract the numeric reading
+4. **Validation**: Plausibility check (blood glucose reading should be between 2.0 and 30.0 mmol/L); reject and prompt re-photo if outside range
+
+Accuracy in controlled conditions: 94%. Accuracy in real user conditions (poor lighting, phone shake, partially obscured): ~78%. The 78% was acceptable for a first version — users could manually correct the reading if the OCR was wrong.
+
+The YOLOv8 fine-tuning was the unexpectedly hard part. I needed labeled data for a narrow device category. I collected it manually (200 photos, 4 hours of labeling in Label Studio) and augmented to 400 with rotation and brightness variations.
+
+---
+
+## What I Learned the Hard Way
+
+**1. "Real user images" are a different category from "demo images."** Every model demo uses clean, well-lit, high-contrast inputs. Real users photograph things at night, on angles, with dirty lenses. Test on ugly inputs before committing to a vision approach.
+
+**2. OCR quality is a UX problem, not just a model problem.** When OCR fails, users need a graceful way to correct the result. If your fallback is "please try again," users will churn. Build the correction flow before you spend time improving OCR accuracy.
+
+**3. Document parsing is harder than it looks.** LayoutLMv3 is impressive in demos. Bank statement parsing in the wild hits edge cases every week — unusual table formats, scanned vs digital-native PDFs, multi-page documents with inconsistent headers. Budget 3x your initial estimate for document parsing accuracy work.
+
+**4. The compute cost of vision is significant.** Image models are much more expensive to run than text models at equivalent throughput. Design the user flow so heavy inference is async (run in background, notify when ready) rather than blocking the UI.
+
+---
+
+<Note>
+For the ML patterns that support vision workflows see [Machine Learning](/ai/machine-learning). For how vision integrates into agent pipelines see [Agents in Production](/ai/agents-in-production).
+</Note>

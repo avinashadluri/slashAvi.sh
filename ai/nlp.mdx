@@ -1,34 +1,77 @@
 ---
-title: "NLP Systems"
-description: "Language stacks powering Thinki.sh, productivity, and Nishabdham experiences."
+title: "How I Use NLP in Production"
+description: "Practitioner notes on language systems — RAG, text processing, bilingual pipelines, and what I've learned."
 ---
 
+> _I'm a practitioner, not a researcher. These notes reflect applied use on real products, not a survey of NLP methods._
 
-Language is core to everything I build—technical docs, Telugu poetry, preventive thinking frameworks. Here’s how I approach NLP.
+Language is central to everything I build — technical documentation, Telugu creative content, preventive thinking tools. Here's how I actually work with it.
 
-## 1. Text Processing Pipeline
-- **Ingest**: Markdown/MDX from repos, transcripts from Whisper, Notion exports.
-- **Cleaning**: LangChain text splitters (recursive) + custom Telugu normalizer.
-- **Embedding**: OpenAI text-embedding-3-small + Cohere rerankers.
-- **Storage**: Supabase pgvector + Pinecone for large datasets.
+---
 
-## 2. Retrieval-Augmented Generation
-- Source: Thinki.sh frameworks, productivity runbooks, Nishabdham essays.
-- Guardrails: cite sources, highlight confidence, mark sensitive items.
-- Tools: LangChain, LlamaIndex, Vercel AI SDK for streaming responses.
+## What I Actually Need to Understand
 
-## 3. Sentiment + Topic Models
-- Hugging Face transformers fine-tuned on bilingual dataset (English + Telugu).
-- Use cases: feedback triage, community moderation, poetry curation.
+- **When to use RAG vs fine-tuning vs prompting** — RAG (retrieval-augmented generation) is the right first choice for knowledge-intensive tasks where the source content changes frequently. Fine-tuning wins when the task pattern is highly specific and stable. Prompting wins for everything else.
+- **Chunking strategy matters more than model choice** — For most RAG systems I've built, the biggest quality improvement came from better chunking, not a bigger model. Chunk at semantic boundaries, not character limits.
+- **Evaluation is the hard part** — BLEU/ROUGE are fast to compute but poorly correlated with what users actually value. I use LLM-as-judge for most evaluation now, with a human review pass on a random sample.
 
-## 4. Evaluation
-- Rouge/BLEU for summarization.
-- Custom rubric for translation accuracy (Telugu ↔ English).
-- Human review loops for culturally sensitive content.
+---
 
-## 5. Deployment Patterns
-- Edge functions for quick responses.
-- Batch jobs for offline processing (SageMaker Processing or Modal).
-- Slack/WhatsApp bots exposing NLP capabilities to teams/community.
+## The Tools I Use and Why
 
-Reuse these patterns for your own multilingual or knowledge-heavy projects.
+| Task | Tool | Reason |
+|---|---|---|
+| Embeddings | OpenAI text-embedding-3-small | Good quality-cost ratio for English; lower cost than large |
+| Reranking | Cohere Rerank | Significant retrieval quality improvement, worth the latency |
+| Vector storage | Supabase pgvector | Good enough for <1M vectors; avoids running a separate service |
+| Large-scale vectors | Pinecone | When Supabase pgvector hits performance limits |
+| RAG orchestration | Vercel AI SDK | Native streaming; integrates with my Next.js frontend |
+| Audio → text | Whisper | Best accuracy on bilingual (Telugu + English) content |
+| Bilingual NLP | Custom normalizer + HuggingFace | Telugu isn't well-covered by off-the-shelf pipelines |
+
+---
+
+## One Concrete Example: Thinki.sh Knowledge Retrieval
+
+Thinki.sh's AI coaching layer needs to retrieve relevant framework content based on what a user describes. The challenge: the user's language is rarely aligned with how the frameworks are named.
+
+A user says: "I keep being surprised when my projects go over budget."
+The relevant framework: Pre-Mortem + Second-Order Thinking.
+
+Keyword search fails here. Semantic search alone misses context. The solution I settled on:
+
+1. **Embed** the user's problem statement
+2. **Retrieve** top-10 candidate chunks from the framework knowledge base (pgvector cosine similarity)
+3. **Rerank** with Cohere Rerank — drops to top 3 chunks most contextually relevant to the specific situation described
+4. **Generate** the coaching response with a prompt that includes the retrieved chunks and explicit instructions to stay grounded in them
+
+The reranking step alone improved response relevance (measured by user "this was helpful" ratings) from 62% to 81%. It added 300ms latency. Worth it.
+
+---
+
+## The Bilingual Pipeline (English + Telugu)
+
+NLP tooling is built almost entirely around English. Using it for Telugu requires workarounds:
+
+- **Tokenization**: Standard tokenizers mangle Telugu script. I use a custom normalizer before passing to most models.
+- **Embeddings**: OpenAI's embeddings handle Telugu reasonably well for semantic similarity. They're weaker for fine-grained Telugu sentiment.
+- **Sentiment analysis**: Off-the-shelf models fail on bilingual Telugu-English content. I built a fine-tuned classifier on ~2,000 labeled examples from Nishabdham content and user feedback.
+- **Translation quality evaluation**: Automated BLEU scores are almost meaningless for English-Telugu because the sentence structures are so different. I use human review for anything culturally significant.
+
+The honest position: Telugu NLP at production quality requires more custom work than I expected. It's getting better — recent multilingual models are significantly improved — but "it handles Telugu" in a model card often means "it doesn't crash on Telugu," not "it handles Telugu well."
+
+---
+
+## What I Learned the Hard Way
+
+**1. Retrieval quality, not model quality, is usually the bottleneck.** The first RAG system I built had excellent embeddings and a weak retrieval strategy. Switching models didn't help. Fixing the chunking and adding reranking did.
+
+**2. Users don't ask questions the way your documents are structured.** Design your chunking around how people will ask, not around how you've organized the content. This often means chunking at the FAQ level, not the section level.
+
+**3. Latency compounds.** Embed + retrieve + rerank + generate can easily hit 3-4 seconds end-to-end. For a chat interface, this is acceptable. For anything that needs to feel real-time, you need streaming at minimum, and probably prefetching of likely next queries.
+
+---
+
+<Note>
+For the ML patterns underlying text classification see [Machine Learning](/ai/machine-learning). For agent-based language workflows see [Agents in Production](/ai/agents-in-production). The [Building RAG Systems](/ai/building-rag-systems) page goes deeper on retrieval architecture.
+</Note>

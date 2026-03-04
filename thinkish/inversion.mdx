@@ -1,0 +1,135 @@
+---
+title: "Inversion — Deep Dive"
+description: "Think backwards. Ask what guarantees failure, then systematically avoid it. A practitioner's guide."
+---
+
+> _"Invert, always invert."_ — Carl Jacobi (mathematician, often quoted by Charlie Munger)
+
+The insight is deceptively simple: many problems are easier to solve backwards. Instead of asking "how do I succeed?", ask "how would I guarantee failure?" Then avoid those things.
+
+This is a deep-dive companion to the [frameworks overview](/thinkish/frameworks). Here's what the 2-paragraph version leaves out.
+
+---
+
+## What It Is (Precisely)
+
+Inversion is not pessimism. It is not catastrophising. It is a structured technique for surfacing risks and failure modes that optimism blinds you to, by temporarily adopting the perspective of someone who wants the project to fail.
+
+The mechanics:
+1. State the goal you're trying to achieve
+2. Ask: "What would guarantee we do NOT achieve this goal?"
+3. List all the failure modes you can generate
+4. For each failure mode: is this risk present in our current plan? What would we do to prevent it?
+5. Return to the forward problem with a better map of the terrain
+
+The output of inversion isn't the solution — it's a set of constraints that any good solution must satisfy.
+
+---
+
+## The Engineering Example: Architecture Review
+
+When I joined a platform team at Bugcrowd, my first major task was reviewing a proposed architecture for a new platform migration. The team had spent six weeks designing it. Everyone was proud. The mood in the review meeting was "let's get this approved and start building."
+
+I ran a forward analysis first (does this design achieve the goal?). It looked reasonable. Then I ran inversion.
+
+**Goal:** Migrate the legacy platform to the new architecture with zero customer-visible downtime in 90 days.
+
+**What would guarantee failure?**
+- Database migration that requires extended lock time during peak traffic hours
+- No rollback plan for the first three services to migrate
+- Shared infrastructure dependencies that haven't been mapped — migrating one service breaks another
+- Team members who own the legacy system going on leave during the migration window
+- No performance baseline captured before migration, so we can't prove "equivalent performance"
+
+Every one of those failure modes was present in the plan.
+
+The team was not incompetent. They were optimistic — which is the default mode when you've been designing something for six weeks and want to build it. Inversion gave us a checklist of things to fix before we started, not a reason to abandon the project.
+
+The migration shipped two weeks late. That is a success. Without inversion, it would have shipped four months late and with a P1 incident.
+
+---
+
+## The Personal Example: Career Moves
+
+In 2020 I was considering whether to take on a tech lead role at a new company. The forward question: "What would make this a great career move?"
+
+Inversion: "What would guarantee this role damages my career?"
+
+- Company fails within 18 months and the role disappears from my CV as a blip
+- Tech debt is so severe that I spend the entire tenure firefighting, not building
+- The team culture is one where blame travels faster than credit
+- The role is tech lead in title only — all decisions actually made above my level
+- I take it for the money and find out in month 3 that I hate the domain
+
+Each item became a due diligence question. I asked specifically about:
+- Runway (they showed me cap table; I trusted it more than the verbal assurance)
+- Codebase age and who owned the oldest parts
+- How they handled the last major incident (who was in the room, what happened after)
+- Decision rights — who made the last architectural call and how
+
+The role was a good one. But I went in with a much clearer picture of the risks than I would have had without inversion.
+
+---
+
+## The Trap: Inversion Paralysis
+
+The failure mode of inversion is using it as permission to not act.
+
+"We inverted and found 12 risks" → "Therefore we should not proceed" → You never ship anything.
+
+Inversion shows you what to avoid, not what to pursue. It is a risk-mapping tool, not a decision rule. After inversion, you still have to make a judgment call about which risks are acceptable, which are mitigable, and which are dealbreakers.
+
+A useful discipline: after listing your failure modes, **score each one** on two axes:
+- **Probability**: how likely is this to happen, given what we know?
+- **Severity**: if it happens, how bad is it and how reversible is it?
+
+High probability + high severity = dealbreaker or mandatory mitigation.
+Low probability + low severity = acknowledged and moved past.
+High severity + low probability = worth having a contingency plan for.
+High probability + low severity = fix it now, it's low cost.
+
+This keeps inversion from becoming a reason to be paralyzed.
+
+---
+
+## Pair It With Forward Planning
+
+Inversion and forward planning are complements, not substitutes. My standard process for anything important:
+
+1. **Forward**: What does success look like? What's the plan to get there?
+2. **Invert**: What would guarantee failure? Is any of that present in the plan?
+3. **Adjust**: Change the plan to reduce the highest-severity failure modes
+4. **Forward again**: Re-evaluate the plan. Does it still achieve the goal?
+5. **Commit**: Make the decision with clear eyes
+
+This takes 30-60 minutes for a medium-stakes decision. It has saved me from more bad calls than any other single practice.
+
+---
+
+## The Template
+
+```
+GOAL: [State the goal in one sentence]
+
+INVERSION: What would guarantee we DO NOT achieve this goal?
+1.
+2.
+3.
+4.
+5.
+
+FOR EACH FAILURE MODE:
+- Is this present in our current plan? (Y/N)
+- Probability: (Low/Medium/High)
+- Severity: (Low/Medium/High)
+- Mitigation or contingency:
+
+REVISED PLAN:
+What changes based on the inversion analysis?
+```
+
+---
+
+<Note>
+Inversion pairs naturally with [Pre-Mortem](/thinkish/pre-mortem) — both are failure-first frameworks, but Pre-Mortem is time-shifted (imagine it already failed). The [decision journal](/thinkish/decision-journal) shows these in practice on real decisions.
+</Note>

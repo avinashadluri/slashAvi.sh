@@ -1,0 +1,135 @@
+---
+title: "First Principles Thinking — Deep Dive"
+description: "Strip a problem to its fundamental truths and rebuild from there. A practitioner's guide with real examples."
+---
+
+> _"I think it's important to reason from first principles rather than by analogy. The normal way we conduct our lives is we reason by analogy."_ — Elon Musk
+
+The quotation is overused. The idea is not.
+
+First principles thinking is the practice of decomposing a problem to its most basic, irreducible truths — things you know are true independent of convention — and then reasoning up from there. It sounds simple. It is not. Most of what we call "thinking" is actually recognizing patterns from past experience and applying them by analogy. That's efficient. It's also how you get stuck.
+
+This is a deep-dive companion to the [frameworks overview](/thinkish/frameworks). That page gives you the 2-paragraph version. This page gives you what you actually need to use it.
+
+---
+
+## What It Is (Precisely)
+
+First principles thinking has two steps people conflate:
+
+1. **Decomposition** — Breaking a problem down until you hit bedrock. Not "how do other companies do this?" but "what is physically, logically, economically true here?"
+2. **Reconstruction** — Building a solution from those bedrock truths, without assuming the conventional solution is the only valid one.
+
+The hard part is step 1. Most people stop two levels short of bedrock.
+
+**Example of stopping short:**
+- "We need a blog because content marketing drives traffic." _(reasoning by analogy — "what others do")_
+- Better: "We need discoverability. Text is indexable. Therefore written content. But what structure?" _(one level deeper)_
+- First principles: "What does our audience actually search for? What format do they trust? What gives us an unfair advantage in their decision?" _(bedrock)_
+
+The answers to the bedrock questions led me to build /avi as a Mintlify docs site rather than a Medium blog. The audience I care about (builders, engineers, thoughtful practitioners) trusts technical documentation more than lifestyle content. The format signals something about how I think.
+
+---
+
+## The Engineering Example: Design Token Architecture at Atlassian
+
+When I joined the Atlassian design systems team, the question on the table was: "How do we scale our token system to 100+ product teams without it becoming ungovernable?"
+
+The analogy-based answer: "Look at how other large design systems (Material, Carbon) handle tokens and adapt their approach."
+
+I ran a first principles decomposition instead:
+
+**What is a design token, fundamentally?**
+A named reference to a value, where the name expresses intent and the value expresses implementation. The name should be stable; the value can change.
+
+**What problem does a token system solve?**
+It decouples semantic intent (what something means — "action primary color") from visual implementation (what it looks like — "#0052CC"). This lets you change the look without changing the meaning.
+
+**What goes wrong at scale?**
+The graph of dependencies between tokens becomes a directed acyclic graph (DAG) with cycles, implicit assumptions, and undocumented usage patterns. Teams consume tokens they weren't intended to use. The intent layer and the implementation layer collapse into each other.
+
+**So what's the actual requirement?**
+A system where:
+- Intent and implementation are always separated by at least one indirection layer
+- Token names express only intent, never implementation detail
+- Consumption is validated at build time, not convention time
+
+This led to a **tiered token architecture** — global → semantic → component — with strict rules about which layer a team could consume. The approach wasn't copied from anyone. It was derived from the actual problem.
+
+---
+
+## The Personal Example: The Decision to Move to Australia
+
+In 2015 I was deciding whether to take a role in Sydney. The default analysis was comparison:
+- "Sydney salaries are higher"
+- "The tech ecosystem is smaller than US/UK but growing"
+- "It's far from family"
+- "Other Indian engineers have done this — some love it, some regret it"
+
+This is reasoning by analogy. Other people's outcomes, other people's variables.
+
+First principles decomposition:
+
+**What am I actually optimizing for in a move?**
+Long-term: ownership, craft, financial security, proximity to the kind of work that matters to me. Medium-term: learning velocity, team quality. Short-term: the visa situation.
+
+**What is true about my situation independent of what others did?**
+- My family is in India; regular visits are non-negotiable for me, not a nice-to-have
+- I want to eventually build products, not just work in products — that means needing savings, runway, and skills I can only get from senior roles
+- The tech scene in Australia in 2015 was growing faster than it appeared from the outside
+
+**What constraints are hard vs soft?**
+- Hard: proximity to family matters more to me than it does to most (I'm the primary earner; my parents are aging)
+- Soft: the size of the tech ecosystem (I can build networks; I can't build geography)
+
+**What's the actual question then?**
+Not "Is Sydney better than staying?" but "Does this role give me a 5-year platform for the thing I actually want to build?" The answer was yes. I went.
+
+---
+
+## The Trap: When to Use It vs When Not To
+
+First principles thinking has a real cost: **time and cognitive load**. It is expensive. Do not use it for decisions where:
+- The stakes are reversible (if you're wrong, you can fix it cheaply)
+- The problem domain is well-understood and analogy reasoning has a strong track record
+- Speed matters more than optimality
+
+**Use it when:**
+- You're about to make a large, irreversible commitment
+- The conventional solution keeps failing for reasons no one can articulate clearly
+- You're building in a space where the rules are changing (new tech, new market, new regulation)
+
+A rough heuristic: if the cost of being wrong for 2 years is greater than 3 months of salary, run a first principles analysis. Otherwise, use a good analogy.
+
+---
+
+## The Template
+
+Here's the blank I actually use:
+
+```
+PROBLEM: [State the problem in one sentence]
+
+WHAT IS TRUE HERE (independent of convention)?
+1.
+2.
+3.
+
+WHAT CONSTRAINTS ARE REAL VS ASSUMED?
+Real:
+Assumed:
+
+WHAT AM I ACTUALLY OPTIMIZING FOR?
+
+WHAT DOES THE SOLUTION NEED TO DO (NOT be)?
+
+BUILD UP:
+```
+
+The "NOT be" distinction in the last prompt is important. "We need a design system" is a solution shape. "We need designers and engineers to make consistent decisions faster" is the actual requirement. Those lead to different designs.
+
+---
+
+<Note>
+See the [frameworks overview](/thinkish/frameworks) for how this pairs with Inversion and Pre-Mortem. The [decision journal](/thinkish/decision-journal) shows this in practice on real decisions.
+</Note>
