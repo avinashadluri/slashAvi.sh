@@ -1,0 +1,1488 @@
+---
+title: "Staff Frontend Engineer — Interview Prep"
+description: "A phased, comprehensive guide to preparing for a Staff Frontend Engineer interview. Covers React fundamentals through system design, observability, security, and leadership."
+---
+
+This is the guide I wish I had when preparing for Staff-level frontend interviews. It's structured in phases — each builds on the previous one. Don't skip phases even if you think you know the material. Staff interviews test depth, not surface familiarity.
+
+---
+
+## Phase 1: React UI Development — The Foundation
+
+Everything starts here. You'll be asked to build something live. The project below covers every pattern interviewers look for in a single cohesive exercise.
+
+### Mini-Project: User Search Dashboard
+
+Build a searchable user directory that fetches from an API, displays a filterable list, and handles edge cases gracefully. This single project tests: API integration, list rendering, debouncing, loading/error states, pagination, and keyboard accessibility.
+
+```tsx
+// types.ts
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  department: string;
+  avatar: string;
+}
+
+interface ApiResponse {
+  users: User[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+```
+
+#### 1.1 Custom Hook: `useDebounce`
+
+Interviewers love this. It tests understanding of closures, refs, cleanup, and timing.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+```
+
+**Follow-up questions interviewers ask:**
+- Why `useState` + `useEffect` instead of `useRef`? (Answer: we need a re-render when the debounced value changes.)
+- What happens if `delay` changes between renders? (Answer: the effect re-runs, old timer is cleaned up.)
+- How would you make this cancelable? (Answer: return a cancel function, or use `useRef` to expose the timer ID.)
+
+#### 1.2 Custom Hook: `useFetch` with Abort Controller
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+interface FetchState<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+}
+
+function useFetch<T>(url: string | null): FetchState<T> {
+  const [state, setState] = useState<FetchState<T>>({
+    data: null,
+    loading: false,
+    error: null,
+  });
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!url) return;
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    const controller = abortControllerRef.current;
+    setState(prev => ({ ...prev, loading: true, error: null }));
+
+    fetch(url, { signal: controller.signal })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => setState({ data, loading: false, error: null }))
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          setState({ data: null, loading: false, error: err.message });
+        }
+      });
+
+    return () => controller.abort();
+  }, [url]);
+
+  return state;
+}
+```
+
+**Key talking points:**
+- AbortController prevents race conditions — if the user types fast, previous requests are cancelled.
+- Checking `AbortError` prevents setting error state for intentionally cancelled requests.
+- `url` being `null` skips the fetch entirely — useful for conditional fetching.
+
+#### 1.3 The Search Component
+
+```tsx
+function UserSearch() {
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const debouncedQuery = useDebounce(query, 300);
+
+  const url = debouncedQuery
+    ? `/api/users?q=${encodeURIComponent(debouncedQuery)}&page=${page}`
+    : null;
+
+  const { data, loading, error } = useFetch<ApiResponse>(url);
+
+  // Reset to page 1 when search query changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery]);
+
+  return (
+    <div role="search" aria-label="User search">
+      <input
+        type="search"
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="Search users..."
+        aria-label="Search users by name or email"
+      />
+
+      {loading && <div role="status" aria-live="polite">Loading...</div>}
+      {error && <div role="alert">Error: {error}</div>}
+
+      {data && (
+        <>
+          <p aria-live="polite">{data.total} results found</p>
+          <UserList users={data.users} />
+          <Pagination
+            page={data.page}
+            total={data.total}
+            pageSize={data.pageSize}
+            onPageChange={setPage}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+#### 1.4 List Rendering with Virtualization Awareness
+
+```tsx
+function UserList({ users }: { users: User[] }) {
+  if (users.length === 0) {
+    return <p>No users match your search.</p>;
+  }
+
+  return (
+    <ul role="list">
+      {users.map(user => (
+        <UserCard key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+
+const UserCard = React.memo(function UserCard({ user }: { user: User }) {
+  return (
+    <li>
+      <img src={user.avatar} alt="" width={40} height={40} loading="lazy" />
+      <div>
+        <strong>{user.name}</strong>
+        <span>{user.email}</span>
+        <span>{user.department}</span>
+      </div>
+    </li>
+  );
+});
+```
+
+**When interviewers push further:**
+- "What if there are 10,000 users?" → Virtualization with `react-window` or `@tanstack/virtual`. Only render visible rows.
+- "Why `React.memo` on `UserCard`?" → Prevents re-render when sibling items change. Only matters for large lists.
+- "Why `key={user.id}` not `key={index}`?" → Index keys break when items are reordered, inserted, or deleted. React can't reconcile correctly.
+
+#### 1.5 Pagination Component
+
+```tsx
+function Pagination({ page, total, pageSize, onPageChange }: {
+  page: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.ceil(total / pageSize);
+
+  return (
+    <nav aria-label="Pagination">
+      <button
+        onClick={() => onPageChange(page - 1)}
+        disabled={page <= 1}
+        aria-label="Previous page"
+      >
+        Previous
+      </button>
+      <span aria-current="page">
+        Page {page} of {totalPages}
+      </span>
+      <button
+        onClick={() => onPageChange(page + 1)}
+        disabled={page >= totalPages}
+        aria-label="Next page"
+      >
+        Next
+      </button>
+    </nav>
+  );
+}
+```
+
+### What This Mini-Project Demonstrates
+
+| Skill | Where It Shows Up |
+|---|---|
+| Custom hooks | `useDebounce`, `useFetch` |
+| API integration | Fetch with abort, error handling |
+| Debouncing | Search input → delayed API call |
+| List rendering | Keyed list, `React.memo`, empty state |
+| Pagination | Page state, derived URL, reset on query change |
+| Accessibility | ARIA roles, live regions, labels |
+| TypeScript | Generics in hooks, typed props |
+| Race condition handling | AbortController pattern |
+
+---
+
+## Phase 2: Advanced React Patterns & State Management
+
+Staff engineers are expected to choose the right pattern for the problem, not default to one approach for everything.
+
+### 2.1 Compound Components
+
+Used when multiple components share implicit state. The classic example is a `<Tabs>` or `<Accordion>`.
+
+```tsx
+const AccordionContext = createContext<{
+  openItems: Set<string>;
+  toggle: (id: string) => void;
+} | null>(null);
+
+function Accordion({ children }: { children: React.ReactNode }) {
+  const [openItems, setOpenItems] = useState<Set<string>>(new Set());
+
+  const toggle = useCallback((id: string) => {
+    setOpenItems(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  return (
+    <AccordionContext.Provider value={{ openItems, toggle }}>
+      {children}
+    </AccordionContext.Provider>
+  );
+}
+
+function AccordionItem({ id, title, children }: {
+  id: string; title: string; children: React.ReactNode;
+}) {
+  const ctx = useContext(AccordionContext);
+  if (!ctx) throw new Error('AccordionItem must be inside Accordion');
+  const isOpen = ctx.openItems.has(id);
+
+  return (
+    <div>
+      <button
+        onClick={() => ctx.toggle(id)}
+        aria-expanded={isOpen}
+        aria-controls={`panel-${id}`}
+      >
+        {title}
+      </button>
+      {isOpen && <div id={`panel-${id}`} role="region">{children}</div>}
+    </div>
+  );
+}
+```
+
+### 2.2 Render Props vs. Hooks — When Each Wins
+
+| Pattern | Use When |
+|---|---|
+| Custom hooks | Logic reuse without UI coupling. Default choice. |
+| Render props | The consumer needs to control rendering but the provider owns the data/logic. Rare post-hooks, but valid for headless UI libraries. |
+| Higher-order components | Almost never in modern React. Legacy codebases only. |
+| Compound components | A set of components that only make sense together and share implicit state. |
+
+### 2.3 State Management Decision Tree
+
+```text
+Is the state used by a single component?
+  → useState / useReducer
+
+Is it shared by a parent and a few children?
+  → Lift state up, pass via props
+
+Is it shared across a subtree with prop drilling pain?
+  → Context + useReducer
+
+Is it server-derived data (fetched, cached, revalidated)?
+  → TanStack Query / SWR / RSC
+
+Is it complex client state shared globally?
+  → Zustand (simple) or Jotai (atomic)
+
+Do you need time-travel debugging or middleware?
+  → Redux Toolkit (still valid, just not always necessary)
+```
+
+### 2.4 React Server Components — The Mental Model
+
+This will come up in every modern React interview.
+
+```text
+Server Components:
+  ✓ Direct database/API access (no waterfall)
+  ✓ Zero client-side JS for this component
+  ✓ Access to secrets, file system, etc.
+  ✗ No useState, useEffect, event handlers
+  ✗ No browser APIs
+
+Client Components:
+  ✓ Interactivity (state, effects, handlers)
+  ✓ Browser APIs (localStorage, geolocation)
+  ✗ Can't import server components directly
+  ✓ CAN render server components passed as children
+
+The "children" pattern — passing server components as children to client
+components — is the key composition technique:
+
+<ClientSidebar>        ← client component (handles collapse state)
+  <ServerNavLinks />   ← server component (fetches nav from DB)
+</ClientSidebar>
+```
+
+### 2.5 `useReducer` for Complex State
+
+When `useState` leads to multiple `set` calls in one handler, switch to `useReducer`.
+
+```tsx
+type State = {
+  filters: Record<string, string>;
+  sort: { field: string; direction: 'asc' | 'desc' };
+  page: number;
+};
+
+type Action =
+  | { type: 'SET_FILTER'; key: string; value: string }
+  | { type: 'SET_SORT'; field: string }
+  | { type: 'SET_PAGE'; page: number }
+  | { type: 'RESET' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SET_FILTER':
+      return {
+        ...state,
+        filters: { ...state.filters, [action.key]: action.value },
+        page: 1,
+      };
+    case 'SET_SORT':
+      return {
+        ...state,
+        sort: {
+          field: action.field,
+          direction:
+            state.sort.field === action.field && state.sort.direction === 'asc'
+              ? 'desc'
+              : 'asc',
+        },
+        page: 1,
+      };
+    case 'SET_PAGE':
+      return { ...state, page: action.page };
+    case 'RESET':
+      return initialState;
+    default:
+      return state;
+  }
+}
+```
+
+---
+
+## Phase 3: Testing Strategy
+
+Staff engineers don't just write tests — they design testing strategies for teams.
+
+### 3.1 The Testing Trophy (Not Pyramid)
+
+```text
+        ╱ E2E ╲               Few — critical user flows only
+       ╱────────╲
+      ╱Integration╲           Most of your tests live here
+     ╱──────────────╲
+    ╱  Unit (logic)   ╲       Pure functions, reducers, utils
+   ╱────────────────────╲
+  ╱  Static (TS + Lint)   ╲   TypeScript + ESLint catch bugs at zero cost
+```
+
+Integration tests give the best ROI for frontend. They test components as users interact with them — no implementation details, no mocking internal state.
+
+### 3.2 Testing the Mini-Project
+
+```tsx
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { setupServer } from 'msw/node';
+
+const server = setupServer(
+  http.get('/api/users', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q') ?? '';
+
+    if (q === 'error') {
+      return new HttpResponse(null, { status: 500 });
+    }
+
+    const users = mockUsers.filter(u =>
+      u.name.toLowerCase().includes(q.toLowerCase())
+    );
+
+    return HttpResponse.json({
+      users,
+      total: users.length,
+      page: 1,
+      pageSize: 20,
+    });
+  })
+);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+test('searches users with debounced input', async () => {
+  const user = userEvent.setup();
+  render(<UserSearch />);
+
+  const input = screen.getByRole('searchbox');
+  await user.type(input, 'alice');
+
+  // Debounce means results don't appear immediately
+  expect(screen.queryByText('alice@example.com')).not.toBeInTheDocument();
+
+  // After debounce delay, results appear
+  await waitFor(() => {
+    expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+  });
+});
+
+test('shows error state on API failure', async () => {
+  const user = userEvent.setup();
+  render(<UserSearch />);
+
+  await user.type(screen.getByRole('searchbox'), 'error');
+
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 500');
+  });
+});
+
+test('cancels previous request on rapid typing', async () => {
+  const user = userEvent.setup();
+  render(<UserSearch />);
+
+  const input = screen.getByRole('searchbox');
+
+  // Type rapidly — only the final debounced value should produce a result
+  await user.type(input, 'al');
+  await user.clear(input);
+  await user.type(input, 'bob');
+
+  await waitFor(() => {
+    expect(screen.getByText('bob@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('alice@example.com')).not.toBeInTheDocument();
+  });
+});
+```
+
+### 3.3 What to Test at Each Layer
+
+| Layer | What to Test | Tools |
+|---|---|---|
+| Static | Type errors, lint rules, import boundaries | TypeScript strict mode, ESLint boundaries plugin |
+| Unit | Pure functions, reducers, utilities, custom hooks | Vitest, `renderHook` |
+| Integration | Component behavior from user's perspective | Testing Library + MSW |
+| Visual | Design system component appearance | Chromatic / Percy + Storybook |
+| E2E | Critical user journeys (sign up, checkout, etc.) | Playwright |
+| Contract | API shape hasn't broken | Pact, OpenAPI diff in CI |
+| Accessibility | WCAG compliance | axe-core, Playwright a11y audit |
+
+### 3.4 Staff-Level Testing Opinions
+
+Things you should have a stance on:
+
+- **Snapshot tests are almost always wrong.** They test implementation, not behavior. They break on every UI change and get blindly updated. Use visual regression tests instead.
+- **100% coverage is a vanity metric.** Coverage measures lines executed, not behavior verified. Target 80% as a floor, but focus on critical paths.
+- **Test behavior, not implementation.** Never assert on internal state, CSS classes, or DOM structure. Assert on what the user sees and can do.
+- **MSW over manual mocks.** Mocking at the network layer means your tests exercise your actual fetch logic, error handling, and data transformations.
+- **Flaky tests are a team-health signal.** Track flake rate. A flaky test suite is worse than no test suite because it trains engineers to ignore failures.
+
+---
+
+## Phase 4: Performance & Web Vitals
+
+Staff engineers own performance culture. You need to know the metrics, the measurement, and the organizational strategy.
+
+### 4.1 Core Web Vitals — What Actually Matters
+
+| Metric | What It Measures | Target | Common Fix |
+|---|---|---|---|
+| LCP (Largest Contentful Paint) | When the main content is visible | < 2.5s | Optimize critical image, preload fonts, eliminate render-blocking JS |
+| INP (Interaction to Next Paint) | Responsiveness to user input | < 200ms | Break long tasks, use `startTransition`, defer non-critical work |
+| CLS (Cumulative Layout Shift) | Visual stability | < 0.1 | Set explicit dimensions on images/ads, use `font-display: swap` with size-adjust |
+
+### 4.2 Performance Optimization Toolkit
+
+**Bundle analysis:**
+
+```bash
+# Analyze what's in your bundle
+npx next build
+npx @next/bundle-analyzer
+
+# Or for Vite
+npx vite-bundle-visualizer
+```
+
+**Code splitting strategies:**
+
+```tsx
+// Route-level splitting (automatic in Next.js)
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+
+// Component-level splitting for heavy components
+const HeavyChart = lazy(() => import('./components/Chart'));
+
+function AnalyticsPanel({ showChart }: { showChart: boolean }) {
+  return (
+    <div>
+      <MetricsSummary />
+      {showChart && (
+        <Suspense fallback={<ChartSkeleton />}>
+          <HeavyChart />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+```
+
+**Image optimization checklist:**
+- Use `next/image` or equivalent (automatic WebP/AVIF, responsive sizes, lazy loading)
+- Set explicit `width` and `height` to prevent CLS
+- Use `priority` for above-the-fold hero images (disables lazy loading, adds preload)
+- Use `sizes` attribute to avoid downloading oversized images on small screens
+
+**Font optimization:**
+
+```css
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter-var.woff2') format('woff2');
+  font-display: swap;
+  font-weight: 100 900;
+  size-adjust: 100%;
+  ascent-override: 90%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+}
+```
+
+### 4.3 React-Specific Performance Patterns
+
+**Avoiding unnecessary re-renders:**
+
+```tsx
+// Problem: new object reference on every render
+<UserContext.Provider value={{ user, updateUser }}>
+
+// Fix: memoize the context value
+const contextValue = useMemo(() => ({ user, updateUser }), [user, updateUser]);
+<UserContext.Provider value={contextValue}>
+```
+
+**`useDeferredValue` for expensive renders:**
+
+```tsx
+function SearchResults({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+  const isStale = query !== deferredQuery;
+
+  return (
+    <div style={{ opacity: isStale ? 0.7 : 1 }}>
+      <ExpensiveFilteredList query={deferredQuery} />
+    </div>
+  );
+}
+```
+
+**Web Workers for CPU-heavy tasks:**
+
+```tsx
+// worker.ts
+self.onmessage = (e: MessageEvent<{ data: number[] }>) => {
+  const sorted = e.data.data.sort((a, b) => a - b);
+  self.postMessage({ sorted });
+};
+
+// component.tsx
+const worker = useMemo(() => new Worker(
+  new URL('./worker.ts', import.meta.url)
+), []);
+```
+
+### 4.4 Measuring in Production
+
+```tsx
+import { onLCP, onINP, onCLS } from 'web-vitals';
+
+function sendToAnalytics(metric: { name: string; value: number; id: string }) {
+  navigator.sendBeacon('/api/vitals', JSON.stringify({
+    name: metric.name,
+    value: metric.value,
+    id: metric.id,
+    url: window.location.pathname,
+    userAgent: navigator.userAgent,
+    connectionType: (navigator as any).connection?.effectiveType,
+  }));
+}
+
+onLCP(sendToAnalytics);
+onINP(sendToAnalytics);
+onCLS(sendToAnalytics);
+```
+
+Use `navigator.sendBeacon` — it's non-blocking and survives page unloads.
+
+---
+
+## Phase 5: Design Systems & Component Libraries
+
+Staff FE engineers are often the architects of design systems. This is a high-signal interview topic.
+
+### 5.1 Design Token Architecture
+
+```text
+Figma Variables
+    ↓ (Figma API / plugin)
+Token JSON (Style Dictionary format)
+    ↓ (Style Dictionary build)
+CSS Variables + TS Constants + iOS/Android tokens
+    ↓
+Component Library consumes CSS vars
+    ↓
+Product apps consume Component Library
+```
+
+```json
+{
+  "color": {
+    "primary": { "value": "#ff3131", "type": "color" },
+    "primary-hover": { "value": "#e02020", "type": "color" },
+    "surface": { "value": "#ffffff", "type": "color" },
+    "surface-elevated": { "value": "#f8f9fa", "type": "color" }
+  },
+  "spacing": {
+    "xs": { "value": "4px", "type": "dimension" },
+    "sm": { "value": "8px", "type": "dimension" },
+    "md": { "value": "16px", "type": "dimension" },
+    "lg": { "value": "24px", "type": "dimension" }
+  }
+}
+```
+
+### 5.2 Component API Design Principles
+
+**Composition over configuration:**
+
+```tsx
+// Bad — prop explosion
+<Card
+  title="Hello"
+  subtitle="World"
+  icon="star"
+  footer={<Button>Click</Button>}
+  headerAction={<IconButton icon="close" />}
+/>
+
+// Good — composable slots
+<Card>
+  <Card.Header>
+    <Card.Title>Hello</Card.Title>
+    <IconButton icon="close" />
+  </Card.Header>
+  <Card.Body>World</Card.Body>
+  <Card.Footer>
+    <Button>Click</Button>
+  </Card.Footer>
+</Card>
+```
+
+**Polymorphic `as` prop:**
+
+```tsx
+interface ButtonProps<T extends React.ElementType = 'button'> {
+  as?: T;
+  variant: 'primary' | 'secondary' | 'ghost';
+  children: React.ReactNode;
+}
+
+function Button<T extends React.ElementType = 'button'>({
+  as,
+  variant,
+  children,
+  ...rest
+}: ButtonProps<T> & Omit<React.ComponentPropsWithRef<T>, keyof ButtonProps>) {
+  const Component = as ?? 'button';
+  return <Component className={`btn btn-${variant}`} {...rest}>{children}</Component>;
+}
+
+// Usage
+<Button variant="primary">Click me</Button>
+<Button as="a" variant="secondary" href="/about">About</Button>
+<Button as={Link} variant="ghost" to="/dashboard">Dashboard</Button>
+```
+
+### 5.3 Versioning & Release Strategy
+
+| Strategy | When to Use |
+|---|---|
+| Semantic versioning (semver) | External-facing libraries consumed by other teams |
+| Calendar versioning (calver) | Internal design systems with regular cadence |
+| Canary releases | Let early-adopter teams test before stable promotion |
+| Codemods | Ship breaking changes with automated migration scripts |
+
+### 5.4 Accessibility as a First-Class Concern
+
+A staff engineer's stance on accessibility is table stakes.
+
+- Every interactive component needs keyboard navigation.
+- Every form input needs a visible label (not just placeholder).
+- Color contrast ratio: 4.5:1 for normal text, 3:1 for large text.
+- Screen reader announcements for dynamic content (`aria-live`).
+- Focus management: trap focus in modals, restore focus on close.
+- Automated testing: `axe-core` in CI, Storybook a11y addon, Playwright accessibility audit.
+
+---
+
+## Phase 6: Build Tooling, NPM Packages & Monorepos
+
+### 6.1 Module Systems — Know the Difference
+
+| System | Syntax | Environment | Key Trait |
+|---|---|---|---|
+| CommonJS | `require()` / `module.exports` | Node.js | Synchronous, not tree-shakeable |
+| ESM | `import` / `export` | Browser + Node | Async, tree-shakeable, static analysis |
+| UMD | Universal wrapper | Both | Legacy compatibility pattern |
+
+Your library should ship **both ESM and CJS** until the ecosystem fully migrates.
+
+```json
+{
+  "name": "@company/ui",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.mjs",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./Button": {
+      "import": "./dist/esm/Button.mjs",
+      "require": "./dist/cjs/Button.js",
+      "types": "./dist/types/Button.d.ts"
+    }
+  },
+  "sideEffects": false
+}
+```
+
+### 6.2 Build Tool Landscape
+
+| Tool | Role | When to Use |
+|---|---|---|
+| Vite | Dev server + production bundler | Default choice for apps |
+| esbuild | Ultra-fast bundler/transpiler | Library builds, scripts |
+| tsup | Library bundler (wraps esbuild) | Building npm packages |
+| Rollup | Bundler with advanced tree-shaking | Libraries needing fine-grained output |
+| Turbopack | Next.js bundler (successor to webpack) | Next.js projects |
+| SWC | Rust-based transpiler | Drop-in Babel replacement |
+
+### 6.3 Monorepo Tooling
+
+```text
+Workspace Manager (pnpm workspaces / npm workspaces / yarn workspaces)
+    ↓
+Task Orchestrator (Turborepo / Nx)
+    ↓
+Package Build (tsup / Vite library mode)
+    ↓
+Changeset Management (changesets)
+    ↓
+Publishing (npm publish via CI)
+```
+
+**Turborepo `turbo.json` example:**
+
+```json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "lint": {},
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}
+```
+
+`dependsOn: ["^build"]` means "build my dependencies first." Turborepo handles caching, parallelism, and only re-building what changed.
+
+### 6.4 Publishing an NPM Package — The Checklist
+
+1. **`package.json` `exports` field** — define entry points precisely
+2. **`sideEffects: false`** — enable tree-shaking
+3. **`peerDependencies`** — don't bundle React; let the consumer provide it
+4. **Changesets** — automate versioning and changelogs
+5. **Provenance** — `npm publish --provenance` signs the package with your CI identity
+6. **`prepublishOnly`** script — run build + test before every publish
+7. **`.npmignore` or `files` field** — only publish what consumers need
+
+---
+
+## Phase 7: Observability & Monitoring
+
+Frontend observability is an emerging expectation for Staff engineers. Most teams have backend observability; few have meaningful frontend visibility.
+
+### 7.1 The Three Pillars for Frontend
+
+| Pillar | What It Captures | Tools |
+|---|---|---|
+| **Logs** | Console errors, caught exceptions, API failures | Sentry, Datadog RUM, LogRocket |
+| **Metrics** | Web Vitals, custom timing, error rates | Prometheus + Grafana, Datadog, SpeedCurve |
+| **Traces** | Full request lifecycle (browser → API → DB → response) | OpenTelemetry, Honeycomb, Datadog APM |
+
+### 7.2 Error Monitoring Setup
+
+```tsx
+import * as Sentry from '@sentry/react';
+
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
+  ],
+  tracesSampleRate: 0.1,
+  replaysSessionSampleRate: 0.01,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+// Error boundary with Sentry reporting
+const SentryErrorBoundary = Sentry.withErrorBoundary(App, {
+  fallback: ({ error, resetError }) => (
+    <ErrorFallback error={error} onRetry={resetError} />
+  ),
+});
+```
+
+### 7.3 OpenTelemetry in the Browser
+
+```tsx
+import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import { Resource } from '@opentelemetry/resources';
+
+const provider = new WebTracerProvider({
+  resource: new Resource({
+    'service.name': 'web-app',
+    'deployment.environment': process.env.NODE_ENV,
+  }),
+});
+
+provider.addSpanProcessor(
+  new BatchSpanProcessor(
+    new OTLPTraceExporter({ url: '/api/traces' })
+  )
+);
+
+provider.register();
+
+registerInstrumentations({
+  instrumentations: [new FetchInstrumentation()],
+});
+```
+
+This gives you distributed traces that connect a button click → fetch request → backend handler → database query in one trace view.
+
+### 7.4 Custom Business Metrics
+
+```tsx
+function trackFeatureUsage(feature: string, metadata?: Record<string, string>) {
+  performance.mark(`feature:${feature}:start`);
+
+  return {
+    end() {
+      performance.mark(`feature:${feature}:end`);
+      performance.measure(
+        `feature:${feature}`,
+        `feature:${feature}:start`,
+        `feature:${feature}:end`
+      );
+    }
+  };
+}
+
+// Usage
+const tracker = trackFeatureUsage('invoice-search', { source: 'sidebar' });
+// ... user completes action ...
+tracker.end();
+```
+
+### 7.5 SLIs and SLOs for Frontend
+
+| SLI (Indicator) | SLO (Objective) | Measurement |
+|---|---|---|
+| LCP p75 | < 2.5s for 99% of page loads | RUM data, 28-day rolling |
+| Error rate | < 0.5% of sessions encounter unhandled errors | Sentry session data |
+| API success rate | > 99.9% of frontend-initiated API calls succeed | Fetch instrumentation |
+| INP p75 | < 200ms for 95% of interactions | Web Vitals RUM |
+
+---
+
+## Phase 8: Security
+
+Security questions at Staff level go beyond "use HTTPS." You're expected to architect secure defaults.
+
+### 8.1 XSS Prevention
+
+```tsx
+// React is safe by default — JSX escapes strings
+<div>{userInput}</div>  // ✅ Escaped
+
+// The one dangerous API
+<div dangerouslySetInnerHTML={{ __html: userInput }} />  // ❌ XSS vector
+
+// If you MUST render HTML, sanitize first
+import DOMPurify from 'dompurify';
+<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userInput) }} />
+```
+
+### 8.2 Content Security Policy
+
+```text
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' 'nonce-{random}';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data: https:;
+  connect-src 'self' https://api.example.com;
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self';
+```
+
+Serve CSP as an HTTP header, not a meta tag. Use nonce-based script allowlisting instead of `'unsafe-inline'`.
+
+### 8.3 Authentication Token Handling
+
+| Approach | Storage | XSS Risk | CSRF Risk | Recommendation |
+|---|---|---|---|---|
+| `localStorage` | Persistent | High (JS can read) | None | Avoid for auth tokens |
+| `sessionStorage` | Tab-scoped | High | None | Avoid for auth tokens |
+| HttpOnly cookie | Automatic | None (JS can't read) | Needs CSRF token | Best default |
+| In-memory + refresh | Memory | Low (no persistence) | None | Good for SPAs with refresh token in HttpOnly cookie |
+
+### 8.4 Supply Chain Security
+
+```bash
+# Lock dependencies
+npm ci                           # Use lockfile exactly, don't update
+
+# Audit for known vulnerabilities
+npm audit --audit-level=high
+
+# Pin exact versions for critical dependencies
+npm install --save-exact react@19.0.0
+
+# Use Socket.dev or Snyk in CI to detect suspicious packages
+# Check for typosquatting, excessive permissions, install scripts
+```
+
+### 8.5 Security Headers Checklist
+
+| Header | Purpose |
+|---|---|
+| `Strict-Transport-Security` | Force HTTPS |
+| `X-Content-Type-Options: nosniff` | Prevent MIME type sniffing |
+| `X-Frame-Options: DENY` | Prevent clickjacking |
+| `Referrer-Policy: strict-origin-when-cross-origin` | Control referrer leakage |
+| `Permissions-Policy` | Disable unused browser features (camera, mic, geolocation) |
+
+---
+
+## Phase 9: Analytics & Experimentation
+
+### 9.1 Event Tracking Architecture
+
+```tsx
+type AnalyticsEvent = {
+  name: string;
+  properties: Record<string, string | number | boolean>;
+  timestamp: number;
+  sessionId: string;
+  userId?: string;
+};
+
+class AnalyticsClient {
+  private queue: AnalyticsEvent[] = [];
+  private flushInterval: ReturnType<typeof setInterval>;
+
+  constructor(private endpoint: string, flushMs = 5000) {
+    this.flushInterval = setInterval(() => this.flush(), flushMs);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', () => this.flush());
+    }
+  }
+
+  track(name: string, properties: Record<string, string | number | boolean>) {
+    this.queue.push({
+      name,
+      properties,
+      timestamp: Date.now(),
+      sessionId: this.getSessionId(),
+      userId: this.getUserId(),
+    });
+
+    if (this.queue.length >= 20) this.flush();
+  }
+
+  private flush() {
+    if (this.queue.length === 0) return;
+    const batch = [...this.queue];
+    this.queue = [];
+    navigator.sendBeacon(this.endpoint, JSON.stringify(batch));
+  }
+
+  private getSessionId(): string { /* from sessionStorage */ return ''; }
+  private getUserId(): string | undefined { /* from auth state */ return undefined; }
+}
+```
+
+### 9.2 Feature Flags & A/B Testing
+
+```tsx
+type FeatureFlags = {
+  newCheckoutFlow: boolean;
+  aiSearchEnabled: boolean;
+  maxUploadSizeMb: number;
+};
+
+const FeatureFlagContext = createContext<FeatureFlags | null>(null);
+
+function useFeatureFlag<K extends keyof FeatureFlags>(flag: K): FeatureFlags[K] {
+  const flags = useContext(FeatureFlagContext);
+  if (!flags) throw new Error('FeatureFlagProvider missing');
+  return flags[flag];
+}
+
+// Usage
+function SearchBar() {
+  const aiEnabled = useFeatureFlag('aiSearchEnabled');
+  return aiEnabled ? <AISearchBar /> : <ClassicSearchBar />;
+}
+```
+
+**Staff-level considerations:**
+- Feature flags should be short-lived. Track flag age; remove after rollout.
+- Use server-side evaluation when possible to avoid flash of wrong content.
+- Log which flag variant the user saw with every analytics event for experiment attribution.
+
+### 9.3 Measuring Feature Success
+
+| Signal | How to Measure |
+|---|---|
+| Adoption | % of eligible users who used the feature |
+| Engagement | Frequency and depth of usage per session |
+| Task completion | Funnel analysis from start to success |
+| Performance impact | Web Vitals delta with feature on vs. off |
+| Error impact | Error rate delta with feature on vs. off |
+
+---
+
+## Phase 10: Frontend System Design
+
+This is the highest-signal section. Staff interviews almost always include a system design round.
+
+### 10.1 Framework for Frontend System Design
+
+```text
+1. Requirements Clarification (2-3 min)
+   - Functional: What does the user do?
+   - Non-functional: Scale, latency, offline, i18n, a11y
+   - Constraints: Browser support, mobile, SEO
+
+2. High-Level Architecture (5 min)
+   - Component tree / page structure
+   - Data flow (server → client, client → server)
+   - API contract sketch
+   - Rendering strategy (SSR, SSG, CSR, hybrid)
+
+3. Data Layer (5 min)
+   - State management approach
+   - Caching strategy (TanStack Query, SWR, RSC)
+   - Optimistic updates
+   - Real-time (WebSocket, SSE, polling)
+
+4. Deep Dive (10-15 min)
+   - Pick the hardest part and go deep
+   - Show trade-offs, not just solutions
+   - Discuss failure modes and recovery
+
+5. Non-Functional Concerns (5 min)
+   - Performance budget
+   - Error handling and monitoring
+   - Security
+   - Accessibility
+   - Analytics
+```
+
+### 10.2 Practice Problem: Design Google Docs (Collaborative Editor)
+
+**Requirements:** Real-time collaborative text editing, cursor presence, version history, offline support.
+
+**Architecture sketch:**
+
+```text
+┌─────────────────────────────────────┐
+│              Browser                 │
+│  ┌────────┐  ┌──────┐  ┌────────┐  │
+│  │ Editor │  │Cursor │  │Version │  │
+│  │ (CRDT) │  │ Layer │  │History │  │
+│  └───┬────┘  └───┬───┘  └───┬────┘  │
+│      │           │           │       │
+│  ┌───┴───────────┴───────────┴───┐   │
+│  │     Sync Engine (CRDT)         │   │
+│  └───────────────┬────────────────┘   │
+│                  │                    │
+│  ┌───────────────┴────────────────┐   │
+│  │   IndexedDB (offline buffer)    │   │
+│  └───────────────┬────────────────┘   │
+└──────────────────┼────────────────────┘
+                   │ WebSocket
+┌──────────────────┼────────────────────┐
+│  ┌───────────────┴────────────────┐   │
+│  │   WebSocket Gateway             │   │
+│  └───────────────┬────────────────┘   │
+│  ┌───────────────┴────────────────┐   │
+│  │   CRDT Merge Service            │   │
+│  └───────────────┬────────────────┘   │
+│  ┌───────────────┴────────────────┐   │
+│  │   Document Store (Postgres)     │   │
+│  └────────────────────────────────┘   │
+└───────────────────────────────────────┘
+```
+
+**Key decisions to discuss:**
+- **CRDT vs OT:** CRDTs (Yjs, Automerge) are simpler for P2P and offline. OT (Google's approach) is more complex but produces smaller payloads.
+- **Rendering:** ContentEditable is fragile; modern editors (ProseMirror, Lexical, Tiptap) abstract over it with a virtual document model.
+- **Offline:** Buffer operations in IndexedDB, replay on reconnect. CRDT handles merge conflicts automatically.
+- **Cursor presence:** Broadcast cursor positions via WebSocket, render as colored overlays. Debounce position updates to reduce traffic.
+
+### 10.3 Practice Problem: Design an Infinite-Scroll Feed (Twitter/X)
+
+**Key architecture decisions:**
+
+```text
+Rendering:
+  - Virtualized list (only render visible items + buffer)
+  - Placeholder skeletons for pending items
+
+Data:
+  - Cursor-based pagination (not offset-based — offset breaks when new items are added)
+  - TanStack Query with `useInfiniteQuery` for automatic page management
+  - Prefetch next page when user reaches 70% scroll depth
+
+Real-time updates:
+  - SSE or WebSocket for new items
+  - "New posts available" banner instead of auto-injecting (prevents layout shift)
+
+Optimistic updates:
+  - Like/retweet reflected immediately in UI
+  - Roll back on server failure
+
+Image handling:
+  - Lazy load below-fold images
+  - Aspect ratio containers to prevent CLS
+  - Progressive JPEG / BlurHash for placeholder
+```
+
+### 10.4 Practice Problem: Design a Design System Component Library
+
+**Key architecture decisions:**
+
+```text
+Package structure:
+  packages/
+    tokens/          ← design tokens (JSON → CSS vars + TS constants)
+    primitives/      ← unstyled, accessible base components (like Radix)
+    components/      ← styled components consuming tokens + primitives
+    icons/           ← SVG icon library with tree-shakeable exports
+    docs/            ← Storybook + usage documentation
+
+Distribution:
+  - Ship ESM + CJS + types
+  - CSS as separate importable stylesheet (not CSS-in-JS runtime)
+  - Each component independently importable via package.json exports
+
+Governance:
+  - RFC process for new components
+  - Breaking changes require codemod + migration guide
+  - Figma ↔ code sync via tokens pipeline
+  - Visual regression tests in CI (Chromatic)
+```
+
+---
+
+## Phase 11: Scaling & Infrastructure
+
+### 11.1 Rendering Strategy Decision Matrix
+
+| Strategy | Use When | SEO | TTFB | Interactivity |
+|---|---|---|---|---|
+| SSG (Static Site Generation) | Content doesn't change per-request | Excellent | Fastest (CDN-served) | After hydration |
+| ISR (Incremental Static Regen) | Content changes infrequently | Excellent | Fast (stale-while-revalidate) | After hydration |
+| SSR (Server-Side Rendering) | Content is personalized or real-time | Excellent | Slower (server render per request) | After hydration |
+| CSR (Client-Side Rendering) | Authenticated dashboards, internal tools | Poor | Fastest (shell only) | After JS loads |
+| Streaming SSR | Large pages where parts load at different speeds | Excellent | Fast (progressive) | Progressive |
+
+### 11.2 CDN & Edge Strategy
+
+```text
+User → Edge (Cloudflare/Vercel Edge) → Origin
+
+What lives at the edge:
+  - Static assets (JS, CSS, images, fonts) — immutable cache, 1 year
+  - SSG/ISR pages — cached with revalidation
+  - Edge functions — auth checks, A/B test assignment, geo-routing
+
+What hits origin:
+  - SSR pages — when personalization can't be done at edge
+  - API mutations — always go to origin
+  - WebSocket connections — origin (edge WS support is limited)
+```
+
+**Cache headers that matter:**
+
+```text
+# Immutable static assets (fingerprinted filenames)
+Cache-Control: public, max-age=31536000, immutable
+
+# HTML pages (revalidate frequently)
+Cache-Control: public, max-age=0, s-maxage=60, stale-while-revalidate=300
+
+# API responses (no cache by default)
+Cache-Control: private, no-cache
+```
+
+### 11.3 Micro-Frontends — When and How
+
+**Use micro-frontends when:**
+- Multiple teams need to deploy independently
+- Different parts of the app have different release cadences
+- You're migrating from a legacy framework incrementally
+
+**Avoid when:**
+- You're a single team
+- The app has tight coupling between sections
+- You don't have platform engineering capacity to maintain the integration layer
+
+**Integration approaches:**
+
+| Approach | Isolation | Shared State | Complexity |
+|---|---|---|---|
+| Module Federation | High | Shared deps possible | Medium |
+| iframe | Complete | postMessage only | Low |
+| Route-based split | Medium | Shared cookie/auth | Low |
+| Web Components | High | Events/attributes | Medium |
+
+### 11.4 Internationalization at Scale
+
+```tsx
+// Message format (ICU syntax)
+const messages = {
+  'invoice.count': '{count, plural, =0 {No invoices} one {# invoice} other {# invoices}}',
+  'invoice.amount': '{amount, number, ::currency/AUD}',
+  'invoice.due': 'Due {date, date, medium}',
+};
+
+// Key decisions:
+// 1. Load only the active locale's messages (code-split per locale)
+// 2. Use ICU MessageFormat — handles plurals, gender, dates across all locales
+// 3. Extract strings at build time (FormatJS CLI / i18next-parser)
+// 4. RTL support: use CSS logical properties (margin-inline-start, not margin-left)
+// 5. Date/number formatting: always use Intl APIs, never manual formatting
+```
+
+---
+
+## Phase 12: Leadership & Staff Engineer Behaviors
+
+Technical skills get you into Staff interviews. These behaviors get you the offer.
+
+### 12.1 What "Staff" Actually Means
+
+| Level | Scope | Influence | Output |
+|---|---|---|---|
+| Senior | Feature / team | Direct (code + review) | Ships features with high quality |
+| Staff | Multiple teams / org | Indirect (architecture + standards) | Multiplies team output, not just personal |
+| Principal | Org / company | Strategic (technical vision) | Shapes multi-year technical direction |
+
+### 12.2 Staff Engineer Archetypes
+
+- **Tech Lead:** Guides a team's technical direction, unblocks, and drives execution.
+- **Architect:** Designs cross-team systems, defines standards, reviews critical designs.
+- **Solver:** Parachutes into the hardest problems across the org and unblocks them.
+- **Right Hand:** Partners with engineering leadership to execute org-wide technical strategy.
+
+Most Staff FE roles are Tech Lead or Architect.
+
+### 12.3 How to Talk About Past Work
+
+Use the **STAR-L** framework (Situation, Task, Action, Result, Lessons):
+
+```text
+Situation: "Our design system was adopted by 12 teams but had no versioning
+strategy. Teams were pinned to random commits. Breaking changes caused
+outages in other teams' apps."
+
+Task: "I needed to create a release process that let us ship improvements
+without breaking consumers, and get buy-in from 12 team leads."
+
+Action: "I wrote an RFC proposing semver + changesets + a canary channel.
+I built the CI pipeline, created a migration guide, and ran office hours
+for two weeks to help teams migrate."
+
+Result: "Zero breaking-change incidents in 6 months. Adoption went from
+12 to 23 teams. Designers started using our Figma library because tokens
+were finally in sync."
+
+Lessons: "I learned that the technical solution was 30% of the work.
+The other 70% was communication, documentation, and showing up
+consistently to help teams adopt."
+```
+
+### 12.4 Questions to Ask Your Interviewers
+
+These signal Staff-level thinking:
+
+- "What's the biggest frontend architectural decision you're facing right now?"
+- "How do frontend teams share code across products today? What's the pain?"
+- "What does your deployment pipeline look like for frontend? What breaks?"
+- "How do you measure frontend reliability? Do you have SLOs?"
+- "What's the ratio of platform/infra work vs. product feature work for staff engineers?"
+- "Tell me about a time a Staff engineer's technical decision significantly impacted the business."
+
+---
+
+## Quick Reference: Interview Topic Checklist
+
+<Accordion title="React Fundamentals">
+  - [ ] Hooks: useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext
+  - [ ] Custom hooks: extraction, testing, composition
+  - [ ] Reconciliation and virtual DOM
+  - [ ] Keys and list rendering
+  - [ ] Error boundaries
+  - [ ] Portals
+  - [ ] Suspense and lazy loading
+  - [ ] Server Components vs Client Components
+  - [ ] Concurrent features: startTransition, useDeferredValue
+</Accordion>
+
+<Accordion title="TypeScript">
+  - [ ] Generics and type inference
+  - [ ] Discriminated unions
+  - [ ] Utility types: Pick, Omit, Partial, Required, Record
+  - [ ] Template literal types
+  - [ ] Type narrowing and guards
+  - [ ] Module augmentation
+  - [ ] Strict mode implications
+</Accordion>
+
+<Accordion title="Performance">
+  - [ ] Core Web Vitals (LCP, INP, CLS)
+  - [ ] Bundle splitting and lazy loading
+  - [ ] Image and font optimization
+  - [ ] React rendering optimization (memo, useMemo, context splitting)
+  - [ ] Web Workers for CPU-heavy tasks
+  - [ ] Performance measurement APIs
+  - [ ] Performance budgets and CI enforcement
+</Accordion>
+
+<Accordion title="Testing">
+  - [ ] Testing Trophy strategy
+  - [ ] React Testing Library patterns
+  - [ ] MSW for API mocking
+  - [ ] Visual regression testing
+  - [ ] E2E with Playwright
+  - [ ] Accessibility testing
+  - [ ] Contract testing
+</Accordion>
+
+<Accordion title="System Design">
+  - [ ] Collaborative editor (CRDT vs OT)
+  - [ ] Infinite scroll feed
+  - [ ] Design system library
+  - [ ] Real-time dashboard
+  - [ ] E-commerce checkout flow
+  - [ ] File upload system
+  - [ ] Notification system
+</Accordion>
+
+<Accordion title="Infrastructure">
+  - [ ] SSR / SSG / ISR / CSR trade-offs
+  - [ ] CDN and caching strategy
+  - [ ] Micro-frontends
+  - [ ] Monorepo tooling (Turborepo, Nx, pnpm workspaces)
+  - [ ] CI/CD for frontend
+  - [ ] Feature flags and progressive rollouts
+  - [ ] Internationalization
+</Accordion>
+
+<Accordion title="Security & Observability">
+  - [ ] XSS, CSRF, CSP
+  - [ ] Auth token handling
+  - [ ] Supply chain security
+  - [ ] Error monitoring (Sentry)
+  - [ ] RUM and Web Vitals reporting
+  - [ ] OpenTelemetry in browser
+  - [ ] SLIs and SLOs for frontend
+</Accordion>
+
+<Accordion title="Leadership">
+  - [ ] Writing RFCs and ADRs
+  - [ ] Running design reviews
+  - [ ] Mentoring and growing engineers
+  - [ ] Cross-team influence without authority
+  - [ ] Incident response and postmortems
+  - [ ] Technical strategy and roadmapping
+</Accordion>
