@@ -267,6 +267,26 @@
         ]
       },
       {
+        "tab": "Photography",
+        "groups": [
+          {
+            "group": "The Journey",
+            "pages": [
+              "photography/intro",
+              "photography/journey",
+              "photography/gear"
+            ]
+          },
+          {
+            "group": "Craft",
+            "pages": [
+              "photography/lessons",
+              "photography/storytelling"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Thinkish",
         "groups": [
           {
@@ -363,7 +383,8 @@
     "socials": {
       "x": "https://x.com/avinashadluri",
       "github": "https://github.com/avinashadluri",
-      "linkedin": "https://linkedin.com/in/avinashadluri"
+      "linkedin": "https://linkedin.com/in/avinashadluri",
+      "instagram": "https://instagram.com/slashaviLens"
     }
   }
 }
