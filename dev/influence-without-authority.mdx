@@ -1,0 +1,119 @@
+---
+title: "Influence Without Authority: The Staff Engineer's Real Job"
+description: "How to drive technical change across teams when nobody reports to you — building consensus, navigating resistance, and the art of organizational persuasion."
+---
+
+Nobody reports to me. I don't control anyone's performance review, I can't assign work, and I have zero hiring or firing authority. And yet, my job is to drive technical direction across multiple teams, align engineers on shared approaches, and sometimes convince people to throw away months of work and start over.
+
+This is the central paradox of the staff engineer role: you have enormous responsibility and almost no formal authority. If you can't influence without authority, you can't do the job. Full stop.
+
+I learned this the hard way. Early in my staff journey at Atlassian, I had a technically correct proposal for standardizing our frontend build pipeline. I presented it to the affected teams with the confidence of someone who knew they were right. The proposal was sound. The teams ignored it. Not because they disagreed with the technical merits — because I hadn't invested in the relationships and trust needed to make adoption feel safe rather than imposed.
+
+That failure taught me more about the staff role than any technical challenge ever has.
+
+## Why the Authority Gap Exists
+
+Staff engineers exist in an organizational design tension. Companies need someone to own cross-cutting technical direction, but they don't want to create a technical hierarchy that undermines team autonomy. The result is a role that depends entirely on soft power.
+
+This is actually by design, not a bug. If staff engineers could mandate technical decisions, teams would lose ownership and engagement. The best technical direction emerges when teams choose to follow it because they understand and believe in it — not because someone with authority told them to.
+
+<Info>
+At Weel, with a smaller team, the authority gap was narrower. I could walk over to any engineer, explain my reasoning, and get buy-in in a single conversation. At Atlassian, with hundreds of engineers across dozens of teams, the same persuasion required months of groundwork. The skill is the same; the scale changes everything.
+</Info>
+
+## The Three Currencies of Influence
+
+After years of operating in this mode, I've identified three currencies that staff engineers trade in. You need all three; any one alone is insufficient.
+
+### 1. Trust
+
+Trust is earned through consistency, competence, and character. People follow your technical recommendations because you've been right before, you've been honest about being wrong, and you've never thrown anyone under the bus.
+
+Trust accumulates slowly and evaporates instantly. One political move, one instance of taking credit for someone else's work, one moment of dismissing a junior engineer's concern — and you're rebuilding from scratch.
+
+At Atlassian, I spent my first six months in a new product area mostly listening. I reviewed code, asked questions, and built relationships before proposing any changes. When I eventually proposed a significant architecture shift, the teams were willing to engage because they'd seen me invest in understanding their constraints first.
+
+### 2. Expertise
+
+People defer to expertise they respect. This means you need to maintain genuine technical depth even as your scope broadens. If engineers sense that you're proposing solutions you couldn't implement yourself, your influence collapses.
+
+This doesn't mean you need to be the expert in everything. It means you need to be demonstrably excellent in your core areas and genuinely curious in the areas where you're learning. "I don't know, but here's how I'd investigate it" is far more credible than faking expertise.
+
+### 3. Relationships
+
+Influence flows through relationships. The staff engineer who knows people across the organization — their concerns, their goals, their constraints — can navigate change far more effectively than one who works in isolation.
+
+I invest deliberately in cross-team relationships. I attend other teams' demos. I offer to review their design docs. I have informal coffee chats with engineers I don't directly work with. These aren't networking tactics — they're genuine investments in understanding how the organization works and what people care about.
+
+<Tip>
+The single best relationship investment: help someone else succeed with no expectation of return. Review their RFC thoroughly. Pair with them on a hard problem. Champion their work in a meeting they're not in. These deposits compound over time into deep trust.
+</Tip>
+
+## Navigating Resistance
+
+Not everyone will agree with your direction, and that's healthy. Resistance isn't the enemy — unexamined resistance is. The key is understanding the type of resistance you're facing and responding appropriately.
+
+| Resistance Pattern | What It Looks Like | Underlying Cause | Response |
+|---|---|---|---|
+| **The Skeptic** | "I don't think this will work because..." | Genuine technical concern | Engage seriously. They might be right. Address the concern head-on with data or prototypes. |
+| **The LGTM-but-won't** | "Sounds great!" (then does nothing) | Agree in principle, disagree on priority | Make the cost of inaction visible. Connect to their team's goals. Make adoption easy. |
+| **The Passive Blocker** | Missed meetings, unanswered documents, endless "one more question" | Disagrees but avoids confrontation | Force the explicit conversation. "I sense some hesitation — can you help me understand what concerns you have?" |
+| **The Turf Protector** | "Our team already handles this" | Perceives threat to team's scope or autonomy | Acknowledge their ownership. Frame your proposal as supporting, not replacing. Find a way they lead part of it. |
+| **The NIH Engineer** | "We should build our own instead" | Pride in craft, distrust of external solutions | Channel their energy into evaluation criteria. Let them prove their case — sometimes they're right. |
+
+The most dangerous pattern is the LGTM-but-won't. These people will agree in every meeting and then quietly continue doing things their way. The only cure is making commitments explicit and following up consistently.
+
+<Warning>
+Never confuse resistance with malice. In my experience, 95% of resistance comes from legitimate concerns — different priorities, incomplete information, past trauma with similar initiatives, or genuine technical disagreement. Assuming bad intent poisons the well permanently.
+</Warning>
+
+## Running Effective Working Groups
+
+When a technical decision spans multiple teams, I use working groups as the primary mechanism for building alignment. A working group is a temporary, cross-team group formed to make a specific decision or drive a specific initiative.
+
+My playbook for working groups that actually work:
+
+1. **Clear charter** — what problem are we solving, what's the scope, and when are we done?
+2. **Right people** — one representative per affected team, with actual decision-making authority (not observers)
+3. **Time-boxed** — working groups that run indefinitely become committees, and committees are where momentum goes to die
+4. **Written artifacts** — every meeting produces a written summary; decisions are documented, not just discussed
+5. **Decision-making protocol** — how do we decide? Consensus? Majority? Lead decides after input? Agree upfront.
+
+At Weel, working groups were informal — a Slack thread and two meetings usually sufficed. At Atlassian, I ran working groups with formal charters, weekly syncs, shared documents, and monthly stakeholder updates. The formality matched the organizational complexity.
+
+## Show, Don't Tell
+
+The single most effective influence tactic I've found: build a prototype. A working prototype is worth a thousand slides. Engineers are rightfully skeptical of abstract proposals — they've seen too many beautiful architectures that fell apart on contact with reality.
+
+When I proposed a new component library approach at Atlassian, I didn't write a 10-page RFC first. I built a working prototype over two weeks — three components, proper TypeScript types, Storybook documentation, and a migration example showing how an existing component could be ported. Then I wrote a short RFC pointing at the working code.
+
+The prototype answered every "but how would we..." question before it was asked. Teams could evaluate a real thing rather than an idea. Adoption started before the RFC was even formally approved because engineers on other teams saw the prototype and started using it.
+
+<Tip>
+A prototype doesn't need to be production-ready. It needs to be real enough that people can interact with it and form opinions based on experience rather than imagination. Two weeks of focused prototyping can save months of debate.
+</Tip>
+
+## Choosing Your Battles
+
+You cannot influence everything simultaneously. Staff engineers who try to drive every technical decision across the org burn out and lose credibility — every recommendation carries less weight when you're recommending everything.
+
+My framework for choosing battles:
+
+- **High impact, low controversy** — just do it. Write the proposal, build the prototype, drive adoption. Don't overthink it.
+- **High impact, high controversy** — invest heavily. Build alliances, gather data, prototype, be patient. These are the ones worth fighting for.
+- **Low impact, low controversy** — delegate. Let someone else lead it for growth experience.
+- **Low impact, high controversy** — let it go. Spending political capital on low-impact battles is the staff engineer's most common mistake.
+
+The hardest discipline is the last category. When you can see that a team is making a suboptimal technical choice but the impact is contained, letting it go is the right move — even though it hurts your engineering sensibilities.
+
+## When to Escalate
+
+Escalation is the nuclear option. Use it rarely, use it deliberately, and never use it as a first resort.
+
+I escalate when: the technical risk is significant and objectively measurable, I've exhausted all peer-level influence channels, the disagreement is about facts (not preferences), and the cost of delay exceeds the cost of escalation.
+
+I don't escalate when: it's a matter of taste, the disagreeing party has legitimate constraints I can't override, or the relationship damage would exceed the technical benefit.
+
+At Atlassian, I escalated exactly twice in three years. Both times were situations where a team was making a decision that would create significant cross-org technical debt, and the team lead and I had genuinely exhausted our ability to find common ground. Both times, the escalation was uncomfortable but necessary.
+
+The rest of the time — dozens of disagreements, philosophical differences, and competing priorities — I found resolution through the slower, harder, more sustainable path of influence. Build trust, demonstrate expertise, invest in relationships, prototype solutions, and meet people where they are. It's not fast, and it's not always satisfying. But it's how durable technical direction actually gets built.

@@ -1,0 +1,182 @@
+---
+title: "On-Call Without Burnout: Designing Rotations That Don't Destroy Your Team"
+description: "Rotation design, runbooks, alert fatigue, escalation policies — building on-call systems that are sustainable."
+---
+
+
+On-call is the tax engineers pay for running production systems. And like any tax, if it's designed poorly, people resent it, avoid it, and eventually revolt. I've been on both sides: the engineer getting paged 6 times in one night for alerts that didn't matter, and the engineering lead designing a rotation that people don't dread.
+
+At Atlassian, on-call was table stakes — every team owned their services, every team had a rotation. Some rotations were healthy. Others had 40% attrition rates. The difference was never the services — it was always the rotation design, the alert quality, and the runbook culture.
+
+At Weel, I built our on-call system from scratch. Here's what I've learned about making on-call sustainable.
+
+## Why On-Call Burns People Out
+
+It's rarely one thing. It's the compounding effect of several:
+
+**Alert fatigue.** When your pager fires 15 times in a night and 12 of them are false positives, you stop trusting the pager. You start ignoring alerts. Then the one real alert gets missed. At Atlassian, one team had 200+ alerts per week. Their MTTR (mean time to resolve) was 3x the company average — not because they were slow, but because they'd become desensitized.
+
+**Unclear runbooks.** Getting paged at 3 AM is bad. Getting paged at 3 AM and having no idea what to do is worse. If the runbook says "check the logs" without specifying which logs, which queries, or what to look for, you've failed the on-call engineer.
+
+**No escalation path.** When an on-call engineer is stuck, they need somewhere to go. If the escalation policy is "figure it out," that's a recipe for 4-hour incidents and burned-out engineers.
+
+**No compensation or recognition.** If on-call is "just part of the job" with no compensation, no time off in lieu, and no recognition, your best engineers will leave for companies where they don't carry pagers.
+
+## Rotation Design
+
+The structure of the rotation matters more than most teams realize.
+
+### Team size matters
+
+| Team Size | Rotation Style | On-Call Frequency | Sustainability |
+|-----------|---------------|-------------------|----------------|
+| 3-4 | Weekly rotation | Every 3-4 weeks | Risky — one person leaving breaks it |
+| 5-7 | Weekly rotation | Every 5-7 weeks | Sweet spot for most teams |
+| 8-12 | Weekly rotation + backup | Every 8-12 weeks | Comfortable, room for shadow shifts |
+| 12+ | Follow-the-sun | Varies by timezone | No after-hours pages, gold standard |
+
+At Weel, our platform team has 6 engineers. Weekly rotation, 6-week cycle. Every engineer is on-call for one week every 6 weeks. That's sustainable. Below 5 engineers, I'd seriously consider whether the team should own on-call at all or whether it should be a shared rotation across teams.
+
+### Handoff rituals
+
+The handoff between on-call shifts is a ceremony, not a Slack message. Our handoff includes:
+
+1. **Active incidents or concerns.** Anything simmering that might escalate.
+2. **Recent deploys.** What shipped this week that might cause issues.
+3. **Alert noise.** Any known false positives or noisy alerts being worked on.
+4. **Personal context.** "I have a dentist appointment Wednesday morning" — because the backup should know when to be extra attentive.
+
+We do this in a 15-minute sync at the start of each rotation. It feels like overhead until the first time it prevents an incident.
+
+## Writing Runbooks That Work at 3 AM
+
+The bar for a good runbook is: **can a sleep-deprived engineer who didn't write this service follow it successfully?** If the answer is no, rewrite it.
+
+### Runbook template
+
+```text
+## Alert: [Alert Name]
+Service: [service-name]
+Severity: [SEV level this typically triggers]
+Last updated: [date]
+Author: @[engineer]
+
+### What This Alert Means
+[One paragraph explaining what condition triggered this alert and why
+it matters. Not "CPU is high" but "The API service CPU exceeds 80%,
+which historically correlates with response times exceeding our 200ms
+SLO. This typically means either a traffic spike or a runaway query."]
+
+### Immediate Actions (do these first)
+1. Check the dashboard: [link to specific Grafana/Datadog dashboard]
+2. Check recent deploys: [link to deploy log]
+3. Check for upstream issues: [link to status pages of dependencies]
+
+### Diagnosis Decision Tree
+- If CPU is high AND request count is normal → likely a runaway query
+  → Check slow query log: [link] → see "Query Performance" section
+- If CPU is high AND request count is 2x+ normal → traffic spike
+  → Check if legitimate → if yes, scale up: [command]
+- If CPU is high AND recent deploy within 2 hours → likely regression
+  → Rollback: [command] → page the deploying engineer
+
+### Escalation
+If unresolved after 15 minutes:
+- Page @platform-team-lead
+- If financial impact: page @engineering-manager + @head-of-product
+
+### Related Runbooks
+- [Database connection pool exhaustion](#)
+- [API rate limiting](#)
+```
+
+<Tip>
+Include actual commands, actual links, and actual dashboard URLs. "Check Grafana" is useless. "Open https://grafana.internal/d/abc123 and look at the 'Connection Pool' panel in the top-right" is useful. Specificity saves minutes, and minutes matter at 3 AM.
+</Tip>
+
+## Alert Quality Over Quantity
+
+The single most impactful change I've made to on-call systems is reducing alert volume. Not by suppressing alerts — by making alerts meaningful.
+
+### The alert audit
+
+Every quarter, I run an alert audit. For each alert that fired in the last 90 days:
+
+1. **Did it require human action?** If no, it should be automated or removed.
+2. **Was the action obvious from the alert?** If no, the runbook needs improvement.
+3. **Did it fire outside business hours?** If yes, was it truly urgent enough to page someone at 3 AM?
+4. **Was it a false positive?** If the false positive rate exceeds 10%, fix the threshold or delete the alert.
+
+At Weel, our first audit reduced alerts from 45/week to 12/week. The 33 we removed were either false positives, informational alerts that should've been dashboard metrics, or alerts for conditions that self-healed within minutes.
+
+### SLO-Based Alerting
+
+Instead of alerting on individual symptoms ("CPU > 80%", "memory > 90%"), I alert on SLO burn rate. If our SLO is 99.9% availability over 30 days, an alert fires when we're burning through our error budget faster than expected.
+
+```yaml
+# Prometheus alerting rule — SLO burn rate
+groups:
+  - name: slo-alerts
+    rules:
+      - alert: HighErrorBudgetBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 14.4 * 0.001
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Error budget burning 14.4x faster than sustainable"
+          dashboard: "https://grafana.internal/d/slo-overview"
+          runbook: "https://runbooks.internal/api-error-budget"
+```
+
+This approach dramatically reduces noise. CPU spikes that don't affect users? No page. Brief latency bumps that stay within SLO? No page. Only sustained degradation that threatens the error budget triggers a human response.
+
+<Warning>
+SLO-based alerting requires having SLOs in the first place. If your team hasn't defined SLOs, start there. You can't alert on error budget burn if you haven't defined what the error budget is.
+</Warning>
+
+## Escalation Policies
+
+A clear escalation path prevents the on-call engineer from being a single point of failure.
+
+| Time | Action |
+|------|--------|
+| 0 min | Primary on-call paged |
+| 5 min (no ack) | Secondary on-call paged |
+| 10 min (no ack) | Team lead paged |
+| 15 min (acked but unresolved) | On-call decides: handle or escalate |
+| 30 min (unresolved SEV1) | Engineering manager paged |
+| 60 min (unresolved SEV1) | VP Engineering notified |
+
+The escalation isn't punishment — it's support. When I get paged as an escalation, my job is to help, not to judge. The goal is resolution, not blame.
+
+## Protecting Personal Time
+
+On-call only works if engineers can actually live their lives during the rotation. My rules:
+
+1. **No on-call during approved leave.** Ever. Swap the rotation.
+2. **Comp time for after-hours pages.** Paged between 10 PM and 7 AM? Take a late start the next day. No questions asked.
+3. **Weekend pages get compensated.** Time and a half or equivalent time off — this is non-negotiable for retention.
+4. **On-call load is tracked.** If one person is getting paged disproportionately, the service has a reliability problem, not a rotation problem.
+
+<Info>
+At Weel, we track on-call burden per engineer per quarter. If someone's after-hours page count is more than 2x the team average, we investigate the specific alerts causing it and either fix the underlying issue or rebalance the rotation. On-call fairness is a retention issue disguised as an operational one.
+</Info>
+
+## On-Call Retrospectives
+
+After every on-call rotation, the outgoing engineer writes a brief retro:
+
+- **Pages received:** How many, severity breakdown, time of day
+- **False positives:** Which alerts were noise
+- **Runbook gaps:** What was missing or outdated
+- **Improvement suggestions:** What would make the next rotation better
+
+These retros are the input for the quarterly alert audit. They surface problems continuously instead of waiting for someone to burn out and quit.
+
+The best on-call systems are invisible to the engineers in them. The pager rarely fires. When it does, the runbook is clear. Escalation is easy. The experience is manageable. That's not an accident — it's the result of deliberate design and continuous improvement.

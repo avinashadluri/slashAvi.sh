@@ -1,0 +1,222 @@
+---
+title: "The TypeScript Tax: When Type Safety Costs More Than It Saves"
+description: "An honest look at when TypeScript's type system helps and when it becomes the bottleneck — branded types, deep generics, and knowing when to use 'any' without shame."
+---
+
+
+I've been writing TypeScript professionally since 2017. I've built design systems at Atlassian with hundreds of typed component APIs. I've shipped a fintech backend at Weel where every dollar amount flows through branded types. I'm a true believer in the type system.
+
+And I'm here to tell you: TypeScript has a tax. Not a monetary one — a cognitive, velocity, and complexity tax that compounds silently until your team spends more time fighting the compiler than shipping features. The trick isn't avoiding the tax. It's knowing when you're paying it and whether you're getting a return.
+
+## The Type Complexity Spectrum
+
+Not all type safety is created equal. I think about it on a spectrum:
+
+| Level | What It Looks Like | ROI | Example |
+|-------|-------------------|-----|---------|
+| **Basic** | Typed function params, return types | Very high | `function add(a: number, b: number): number` |
+| **Structural** | Discriminated unions, interfaces | High | `type Result = Success \| Failure` |
+| **Branded** | Nominal types for domain IDs | Medium-high | `type UserId = string & { __brand: 'UserId' }` |
+| **Inferred** | `satisfies`, const assertions, mapped types | Medium | `const config = { ... } satisfies Config` |
+| **Deep Generic** | 3+ type params, conditional types, recursive | Low-medium | `type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }` |
+| **Type Gymnastics** | Template literal parsing, type-level arithmetic | Very low | Parsing URL params at the type level |
+
+Everything from Basic through Branded is almost always worth it. Deep Generics are situational. Type Gymnastics are almost never worth it in application code.
+
+## When Strict Typing Goes Too Far
+
+At Atlassian, I watched a team spend three weeks building a type-safe routing system that parsed URL parameters at the type level. It was genuinely impressive engineering. The type definitions alone were 400+ lines. The inference was so deep that IDE autocomplete took 8-12 seconds to resolve, and `tsc --watch` had a noticeable lag.
+
+The thing it replaced? A simple `useParams<{ id: string }>()` call that took zero seconds to understand and zero seconds to compile.
+
+Here's my test for whether type complexity is justified:
+
+```typescript
+// Question 1: Can a mid-level engineer read this type in under 30 seconds?
+// Question 2: Does the type catch bugs that a unit test wouldn't?
+// Question 3: Would removing this type cause a real production incident?
+
+// If you answered "no" to 2 out of 3, simplify.
+```
+
+The routing types failed all three. A mid-level engineer couldn't read them. The bugs they caught were "wrong URL parameter name" — which a single integration test would also catch. And removing them wouldn't cause any production incident because the app would still work; you'd just lose autocomplete.
+
+## Branded Types: When Useful vs Overkill
+
+I covered branded types in my [TypeScript patterns](/dev/typescript-patterns) page, and I stand by them for IDs that cross module boundaries. At Weel, branded `UserId`, `TransactionId`, and `OrganizationId` types have prevented real argument-swapping bugs in financial code where mixing up IDs could mean debiting the wrong account.
+
+But I've also seen branded types go too far:
+
+```typescript
+// This is useful — IDs that cross module boundaries
+type UserId = Brand<string, 'UserId'>;
+type AccountId = Brand<string, 'AccountId'>;
+
+// This is overkill — branding everything
+type FirstName = Brand<string, 'FirstName'>;
+type LastName = Brand<string, 'LastName'>;
+type EmailSubject = Brand<string, 'EmailSubject'>;
+type LogMessage = Brand<string, 'LogMessage'>;
+```
+
+When you brand `FirstName` and `LastName`, every function that takes a name needs to explicitly construct the branded type. The conversion ceremony (`firstName("Avi" as FirstName)`) adds noise for negligible safety. Nobody has ever shipped a production bug because they passed a first name where a last name was expected.
+
+<Tip>
+Brand the types where mixing them up causes data corruption or financial impact. For everything else, a plain `string` with a descriptive parameter name is fine.
+</Tip>
+
+## Deep Generic Chains Nobody Can Read
+
+Here's a real pattern I've refactored out of a codebase. The author was trying to build a type-safe API client:
+
+```typescript
+type ApiResponse<
+  TData,
+  TMeta extends Record<string, unknown> = Record<string, never>,
+  TError extends BaseError = ApiError,
+  TPagination extends PaginationMeta | never = never,
+> = {
+  data: TPagination extends PaginationMeta
+    ? { items: TData[]; pagination: TPagination }
+    : TData;
+  meta: TMeta extends Record<string, never> ? never : TMeta;
+  error?: TError;
+};
+
+type ApiMethod<
+  TInput extends z.ZodType,
+  TOutput extends z.ZodType,
+  TParams extends Record<string, string> = Record<string, never>,
+  TQuery extends z.ZodType = z.ZodNever,
+> = (
+  input: z.infer<TInput>,
+  params: TParams extends Record<string, never> ? never : TParams,
+  query?: TQuery extends z.ZodNever ? never : z.infer<TQuery>,
+) => Promise<ApiResponse<z.infer<TOutput>>>;
+```
+
+Every consumer of this API client needed a PhD in conditional types to understand what they were calling. The error messages when you got a type wrong were paragraphs long and pointed to the wrong line. New engineers avoided touching anything that used this client.
+
+I replaced it with:
+
+```typescript
+interface ApiResponse<T> {
+  data: T;
+  meta?: Record<string, unknown>;
+}
+
+interface PaginatedResponse<T> extends ApiResponse<T[]> {
+  pagination: { page: number; pageSize: number; total: number };
+}
+
+async function apiGet<T>(url: string, schema: z.ZodType<T>): Promise<T> {
+  const res = await fetch(url);
+  const json = await res.json();
+  return schema.parse(json);
+}
+```
+
+Less type-safe? Marginally. More maintainable? Enormously. The original types encoded every possible API shape into the type system. The replacement trusts Zod to validate at runtime and keeps the types simple enough that any engineer can follow them.
+
+## The Pragmatic `any` (With Guardrails)
+
+I know this is heresy in some circles, but sometimes `any` is the right call. Not `any` sprinkled throughout your codebase — `any` deployed surgically at specific boundaries where the type system's cost exceeds its value.
+
+```typescript
+// Middleware that wraps any Express handler — the generics here would be absurd
+function withErrorHandling(handler: (...args: any[]) => Promise<any>) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await handler(req, res, next);
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+// Third-party library with broken or missing types
+const result = (externalLib as any).undocumentedMethod(data);
+
+// Complex JSON transformations where the intermediate shapes don't matter
+function transformLegacyPayload(raw: any): NormalizedPayload {
+  // ... 40 lines of reshaping nested JSON ...
+  return normalized; // Return type IS typed — that's what matters
+}
+```
+
+<Warning>
+The guardrail: `any` at the boundary, typed at the interface. If a function accepts `any`, its return type must be explicit. If a variable is `any`, the next function it flows into must be typed. The `any` is a bridge, not a destination. And always leave a comment explaining why — if you can't articulate the reason, you probably shouldn't use it.
+</Warning>
+
+## Type Inference vs Explicit Annotations
+
+TypeScript's inference engine is excellent. Let it work. One of the most common signs of TypeScript over-engineering is explicit annotations on things the compiler already knows:
+
+```typescript
+// Over-annotated — TypeScript already infers all of this
+const name: string = "Avi";
+const count: number = items.length;
+const isActive: boolean = user.status === 'active';
+const doubled: number[] = numbers.map((n: number): number => n * 2);
+
+// Let inference work — same safety, less noise
+const name = "Avi";
+const count = items.length;
+const isActive = user.status === 'active';
+const doubled = numbers.map(n => n * 2);
+```
+
+Where explicit annotations earn their keep:
+
+```typescript
+// Function signatures — always annotate params, annotate return types for public APIs
+export function calculateTotal(items: LineItem[]): Money {
+  // ...
+}
+
+// Complex objects where inference would be wider than desired
+const config: AppConfig = {
+  // TypeScript validates this matches AppConfig exactly
+};
+
+// When inference gets it wrong (rare but real)
+const ref = useRef<HTMLInputElement>(null);
+```
+
+My rule of thumb: annotate the boundaries (function signatures, exported constants, class properties), let inference handle the internals.
+
+## The 80/20 Rule of Type Safety
+
+Here's the uncomfortable truth: **80% of TypeScript's bug-prevention value comes from 20% of its features**. Basic types on function parameters, discriminated unions for state, and Zod validation at boundaries — that's the 20% that catches the vast majority of bugs.
+
+The other 80% of TypeScript's type system — mapped types, conditional types, template literal types, recursive types, the `infer` keyword — is powerful and occasionally necessary. But in application code, reaching for these features is usually a sign that your data model needs simplifying, not that your types need to be more complex.
+
+```typescript
+// If you need this in application code, your data model is probably too complex
+type DeepRequired<T> = {
+  [K in keyof T]-?: T[K] extends object
+    ? T[K] extends Array<infer U>
+      ? Array<DeepRequired<U>>
+      : DeepRequired<T[K]>
+    : T[K];
+};
+
+// Simplify the data model instead
+// If a field is optional 4 levels deep, maybe that nesting shouldn't exist
+```
+
+<Info>
+The goal of TypeScript is not to encode every possible constraint into the type system. The goal is to catch the bugs that matter, at the lowest cost to developer experience. When I review PRs, I push back on type complexity as aggressively as I push back on code complexity. They're the same problem.
+</Info>
+
+## What I Tell My Team
+
+When engineers on my team ask "how strict should we be?", I give them this framework:
+
+1. **Type the boundaries.** Function parameters, API responses, database query results, form inputs. This is non-negotiable.
+2. **Use discriminated unions for state.** Any time you have a status field with associated data, model it as a union. This prevents more bugs than anything else.
+3. **Validate at runtime where data enters the system.** Zod at the API boundary, Zod for form validation. The type system can't protect you from bad data over the wire.
+4. **Let inference handle the rest.** If you're annotating local variables, you're wasting keystrokes.
+5. **Reach for `any` before reaching for a 4-level generic.** A targeted `any` with a typed return is cheaper to maintain than a generic tower that nobody can debug.
+
+TypeScript is a tool. Like any tool, it has a cost. The best TypeScript codebases aren't the ones with the most sophisticated types — they're the ones where the type complexity is proportional to the domain complexity. Nothing more, nothing less.

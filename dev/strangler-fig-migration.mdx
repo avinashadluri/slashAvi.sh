@@ -1,0 +1,241 @@
+---
+title: "The Strangler Fig Pattern: How We Migrated a Legacy System Without Stopping the Train"
+description: "A real migration story — incrementally replacing a legacy monolith while keeping it running, using the strangler fig pattern."
+---
+
+
+In the tropical forests of Australia — my adopted home — there's a tree called the strangler fig. It starts life as a seed dropped by a bird onto the branch of a host tree. It sends roots down to the ground, wraps around the host, and over years — sometimes decades — gradually replaces it. The host tree decays and eventually disappears, leaving the fig standing in its place. From the outside, the tree looks the same the entire time. It's only when you cut it open that you see the old wood is gone.
+
+That's exactly how you migrate a legacy system.
+
+I'm going to tell you the story of a real migration — not a sanitized conference talk version, but the messy, political, technically hairy reality of replacing a legacy monolith incrementally while it continued to serve production traffic every day.
+
+## Why Big-Bang Rewrites Fail
+
+Before I tell you what we did, let me tell you what we almost did instead: rewrite from scratch.
+
+The pitch was compelling. The legacy system was a Node.js monolith written in JavaScript (pre-TypeScript adoption), with business logic tangled into Express route handlers, no test coverage to speak of, and a database schema that had grown organically over years into something that resembled a plate of spaghetti more than a relational model.
+
+The engineering team was frustrated. "Let's just rebuild it in TypeScript with NestJS, a clean schema, proper separation of concerns. Six months, tops."
+
+I've heard this pitch before. At Atlassian, I watched a rewrite attempt run for 18 months, consume a team of 8, and get cancelled at 60% completion because the original system had kept evolving during the rewrite. The rewrite was chasing a moving target, and it never caught up.
+
+Big-bang rewrites fail for predictable reasons:
+
+1. **The old system keeps changing.** Business doesn't stop because you're rewriting. New features get added to the old system, and now you're rewriting a bigger target.
+2. **Knowledge is embedded in the code.** That weird `if` statement on line 347? It handles an edge case from a specific client that nobody documented. You won't discover this until production.
+3. **Motivation dies.** Month 8 of a rewrite with nothing shipped to production. The team is demoralized. Leadership is asking hard questions. Someone proposes "let's just ship what we have" — and you end up maintaining two systems.
+4. **Testing parity is impossible.** The old system has been tested by years of real traffic. The new system has been tested by... your unit tests. The gap is enormous.
+
+<Warning>
+If someone on your team proposes a big-bang rewrite of a system that's actively serving production traffic, your default answer should be "no." The burden of proof is on the rewrite to explain why incremental migration won't work, not the other way around.
+</Warning>
+
+## The Proxy Layer: Where It All Starts
+
+The strangler fig pattern starts with a proxy. You place a routing layer in front of the legacy system that can direct traffic to either the old system or the new one, endpoint by endpoint.
+
+```typescript
+// Simplified proxy/routing layer
+const routingTable: Record<string, 'legacy' | 'modern'> = {
+  '/api/v1/users':        'modern',  // migrated
+  '/api/v1/users/:id':    'modern',  // migrated
+  '/api/v1/invoices':     'legacy',  // not yet migrated
+  '/api/v1/payments':     'legacy',  // not yet migrated
+  '/api/v1/reports':      'modern',  // migrated
+};
+
+app.all('/api/v1/*', async (req, res) => {
+  const target = resolveTarget(req.path, routingTable);
+
+  if (target === 'modern') {
+    await proxyToModern(req, res);
+  } else {
+    await proxyToLegacy(req, res);
+  }
+});
+
+function resolveTarget(path: string, table: Record<string, string>): string {
+  // Match against routing table with parameter support
+  for (const [pattern, target] of Object.entries(table)) {
+    if (matchPath(path, pattern)) return target;
+  }
+  return 'legacy'; // Default to legacy for unmigrated routes
+}
+```
+
+In our case, we used an API gateway (AWS API Gateway, but Nginx or Caddy would work too) as the proxy layer. The key property: **from the client's perspective, nothing changed.** Same URLs, same request/response shapes, same authentication. The proxy is invisible.
+
+## Feature Flags: Controlling the Migration
+
+The routing table above is static. In practice, you want dynamic control — the ability to shift traffic gradually and roll back instantly. Feature flags give you this.
+
+```typescript
+// Feature flag-driven routing
+async function resolveTarget(
+  path: string,
+  context: { userId: string; orgId: string },
+): Promise<'legacy' | 'modern'> {
+  const feature = mapPathToFeature(path);
+
+  // Check if this specific feature is migrated
+  const flag = await featureFlags.evaluate(`migration.${feature}`, {
+    userId: context.userId,
+    orgId: context.orgId,
+  });
+
+  return flag.enabled ? 'modern' : 'legacy';
+}
+```
+
+This let us do something powerful: **migrate one customer at a time.** We'd enable the modern backend for internal users first, then for a small cohort of beta customers, then for 10%, 25%, 50%, and finally 100%. At any point, if we saw errors or performance degradation, we'd flip the flag back.
+
+The migration of the invoice module went like this:
+
+| Week | Traffic to Modern | What We Watched |
+|------|-------------------|-----------------|
+| 1 | Internal team only | Error rates, response times, data consistency |
+| 2 | 5% of orgs (smallest) | Edge cases, query performance at small scale |
+| 3 | 25% of orgs | Database load, cache hit rates |
+| 4 | 50% of orgs | Aggregate metrics vs legacy baseline |
+| 5 | 90% of orgs | Long-tail edge cases |
+| 6 | 100% | Monitoring, legacy route removed |
+
+<Tip>
+Start with your internal team, then your smallest/newest customers. They have the least data, the fewest edge cases, and the highest tolerance for issues. Migrate the largest, most complex customers last — by then, you've shaken out most of the bugs.
+</Tip>
+
+## Data Migration: The Hardest Part
+
+Code migration is straightforward compared to data migration. Code is stateless — you can deploy a new version and roll back. Data is stateful — once you've written to a new schema, rolling back means migrating data backwards.
+
+We used the **dual-write pattern** with reconciliation:
+
+```typescript
+// During migration: write to both old and new databases
+async function createInvoice(data: CreateInvoiceDto): Promise<Invoice> {
+  // Write to new database (source of truth going forward)
+  const invoice = await modernDb.invoice.create({ data: mapToNewSchema(data) });
+
+  // Also write to legacy database (keeps legacy system consistent)
+  try {
+    await legacyDb.query(
+      'INSERT INTO invoices (id, client_id, amount, ...) VALUES ($1, $2, $3, ...)',
+      [invoice.id, data.clientId, data.amount],
+    );
+  } catch (error) {
+    // Log but don't fail — modern DB is the source of truth
+    logger.error('Legacy dual-write failed', { invoiceId: invoice.id, error });
+    await alertChannel.send(`Dual-write failed for invoice ${invoice.id}`);
+  }
+
+  return invoice;
+}
+```
+
+For historical data, we ran a background migration job:
+
+```typescript
+// Batch migration job — runs nightly, processes in chunks
+async function migrateHistoricalInvoices() {
+  let cursor: string | null = null;
+  let migrated = 0;
+  let failed = 0;
+
+  while (true) {
+    const batch = await legacyDb.query(
+      `SELECT * FROM invoices
+       WHERE migrated_at IS NULL
+       ORDER BY created_at ASC
+       LIMIT 500
+       ${cursor ? `AND id > '${cursor}'` : ''}`,
+    );
+
+    if (batch.rows.length === 0) break;
+
+    for (const row of batch.rows) {
+      try {
+        await modernDb.invoice.upsert({
+          where: { legacyId: row.id },
+          create: mapLegacyToModern(row),
+          update: mapLegacyToModern(row),
+        });
+
+        await legacyDb.query(
+          'UPDATE invoices SET migrated_at = NOW() WHERE id = $1',
+          [row.id],
+        );
+        migrated++;
+      } catch (error) {
+        logger.error('Migration failed for invoice', { legacyId: row.id, error });
+        failed++;
+      }
+    }
+
+    cursor = batch.rows[batch.rows.length - 1].id;
+    logger.info(`Migration progress: ${migrated} migrated, ${failed} failed`);
+  }
+}
+```
+
+We also ran a **reconciliation job** that compared data between the old and new databases and flagged discrepancies. This caught bugs in the mapping logic that tests alone wouldn't have found — things like timezone conversions, currency rounding differences, and nullable fields that the legacy system handled inconsistently.
+
+<Info>
+Data migration is where you'll discover every undocumented assumption in the legacy system. Budget twice as long as you think you'll need. The code migration took us 3 months. The data migration and reconciliation took 4.
+</Info>
+
+## Measuring Progress
+
+You need metrics that tell the story of the migration to both engineers and stakeholders.
+
+We tracked:
+
+- **Percentage of traffic hitting the modern system** — the headline number for stakeholders
+- **Error rate delta** — modern vs legacy for the same endpoints, by feature
+- **P95 latency delta** — modern vs legacy
+- **Data consistency score** — percentage of records matching between old and new databases
+- **Legacy dependency count** — number of features still relying on legacy code paths
+
+We put these on a dashboard that updated daily. It turned an abstract "we're migrating" into a visible, measurable progress bar. When leadership asked "how's the migration going?", we pointed at the dashboard.
+
+## The Emotional Side: Convincing Stakeholders
+
+The hardest part of a strangler fig migration isn't technical. It's political.
+
+Product managers want features, not infrastructure work. Leadership wants to know why engineers are spending months on something that doesn't add new capabilities. The legacy system "works fine" — from the outside. Only the engineers know how fragile it is.
+
+Here's how I frame it:
+
+**Don't pitch "rewrite."** Pitch "incremental modernization." Rewrite sounds risky and expensive. Modernization sounds responsible and progressive.
+
+**Quantify the cost of the status quo.** "Every new feature takes 3x longer than it should because of the legacy codebase. We spent 40% of last quarter's engineering time on workarounds and tech debt. That's the equivalent of 2 full-time engineers doing work that delivers no customer value."
+
+**Show incremental progress.** Ship something to the modern system within the first 2 weeks — even if it's a simple, low-risk endpoint. Demonstrating that the approach works builds confidence.
+
+**Run the migration alongside feature work.** Don't ask for a "migration quarter" where no features ship. Interleave migration work with feature work. Each sprint delivers some customer-facing value and some migration progress. This keeps stakeholders invested and prevents the migration from becoming a political target.
+
+## The Timeline
+
+Our migration of the core backend took about 9 months end to end:
+
+| Phase | Duration | What Happened |
+|-------|----------|---------------|
+| **Setup** | 2 weeks | Proxy layer, feature flag infrastructure, CI/CD for new service |
+| **First endpoint** | 2 weeks | Migrated user authentication — low risk, high signal |
+| **Core CRUD** | 2 months | Migrated the 5 most-used API modules |
+| **Complex logic** | 3 months | Payment processing, reporting, integrations |
+| **Data migration** | 2 months | Historical data sync, reconciliation, validation |
+| **Long tail** | 1 month | Edge cases, legacy-only features, cleanup |
+| **Decommission** | 2 weeks | Removed legacy routes, archived old code |
+
+The legacy system ran in production for 3 months after we thought we were "done" — serving zero traffic but available as a rollback target. We finally decommissioned it when we were confident the new system handled every edge case.
+
+## What I'd Do Differently
+
+Looking back, three things I'd change:
+
+1. **Start the reconciliation job earlier.** We started it in month 4. If we'd started it in month 1, we'd have caught data mapping issues much sooner.
+2. **Invest more in observability from day one.** We added detailed logging and metrics to the modern system incrementally. Having comprehensive observability from the first deployed endpoint would have made debugging faster.
+3. **Communicate more frequently.** Even with the dashboard, stakeholders felt out of the loop. Weekly 5-minute updates in the all-hands would have built more confidence.
+
+The strangler fig is patient. It doesn't rush. It doesn't try to replace the host tree in one dramatic move. It wraps around it slowly, replacing one piece at a time, until one day the old tree is gone and nobody noticed the transition. That's the migration you want: one where the biggest compliment is "wait, that's done already?"

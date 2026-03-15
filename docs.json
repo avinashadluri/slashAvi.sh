@@ -48,12 +48,13 @@
         "tab": "Engineering",
         "groups": [
           {
-            "group": "Full-Stack TypeScript",
+            "group": "TypeScript at Scale",
             "pages": [
               "dev/fullstack-typescript",
               "dev/nextjs-patterns",
               "dev/nodejs-backend-patterns",
-              "dev/api-design-guide"
+              "dev/api-design-guide",
+              "dev/typescript-tax"
             ]
           },
           {
@@ -61,11 +62,13 @@
             "pages": [
               "dev/design-systems-at-scale",
               "dev/component-api-design",
-              "dev/design-tokens-in-practice"
+              "dev/design-tokens-in-practice",
+              "dev/design-system-adoption",
+              "dev/figma-to-production"
             ]
           },
           {
-            "group": "Engineering Deep Dives",
+            "group": "Deep Dives",
             "pages": [
               "dev/typescript-patterns",
               "dev/react-server-components",
@@ -77,20 +80,43 @@
             ]
           },
           {
-            "group": "Development",
+            "group": "System Design & Architecture",
             "pages": [
-              "dev/web-development",
-              "dev/mobile-development",
-              "dev/devops",
-              "dev/tools-and-setup"
+              "dev/architecture-decision-records",
+              "dev/micro-frontends",
+              "dev/designing-for-scale",
+              "dev/event-driven-architecture",
+              "dev/strangler-fig-migration"
             ]
           },
           {
-            "group": "Best Practices",
+            "group": "Career & Engineering Leadership",
             "pages": [
-              "dev/coding-standards",
-              "dev/architecture-patterns",
-              "dev/testing-strategies"
+              "dev/staff-engineer-role",
+              "dev/senior-to-staff-gap",
+              "dev/technical-strategy-docs",
+              "dev/mentoring-engineers",
+              "dev/influence-without-authority"
+            ]
+          },
+          {
+            "group": "Shipping & DevOps",
+            "pages": [
+              "dev/cicd-pipelines",
+              "dev/feature-flags",
+              "dev/docker-typescript",
+              "dev/incident-response",
+              "dev/oncall-without-burnout"
+            ]
+          },
+          {
+            "group": "Testing & Quality",
+            "pages": [
+              "dev/testing-coverage-myth",
+              "dev/integration-tests",
+              "dev/visual-regression-testing",
+              "dev/testing-ai-features",
+              "dev/playwright-patterns"
             ]
           },
           {
@@ -281,7 +307,9 @@
             "group": "Craft",
             "pages": [
               "photography/lessons",
-              "photography/storytelling"
+              "photography/storytelling",
+              "photography/editing",
+              "photography/photographers"
             ]
           }
         ]

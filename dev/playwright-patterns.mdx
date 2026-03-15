@@ -1,0 +1,302 @@
+---
+title: "E2E with Playwright: The Patterns That Actually Scale Beyond 50 Tests"
+description: "Page objects, fixtures, parallel execution, and the Playwright patterns that keep E2E suites fast and maintainable."
+---
+
+
+Every E2E suite starts with good intentions. Five tests, clean code, runs in 30 seconds. Then it grows. At 20 tests, someone adds a `page.waitForTimeout(5000)` because a test was flaky. At 50 tests, the suite takes 8 minutes and fails randomly twice a week. At 100 tests, the team stops trusting the suite and starts skipping it. I've watched this cycle at three companies.
+
+At Weel, we have 200+ Playwright tests. They run in under 4 minutes in CI. Flaky test rate: under 0.5%. Here are the patterns that make that possible.
+
+## Why E2E Suites Become Unmaintainable
+
+Three patterns kill E2E suites:
+
+**1. No abstraction.** Every test contains raw selectors, navigation steps, and assertion logic. When the UI changes, you update 40 tests instead of one page object.
+
+**2. Implicit waits and timeouts.** `page.waitForTimeout(3000)` is a prayer, not a strategy. Sometimes 3 seconds isn't enough. Sometimes it's wasteful. It's always fragile.
+
+**3. Shared state.** Tests that depend on each other — test B requires the data that test A created. When test A fails or runs out of order, test B fails too. Cascading failures make debugging impossible.
+
+## Page Object Model
+
+The page object model is not new, but it's the single most important pattern for maintainable E2E tests. Every page or major component gets a class that encapsulates its selectors and interactions.
+
+```typescript
+// pages/PaymentPage.ts
+import { type Page, type Locator } from '@playwright/test';
+
+export class PaymentPage {
+  readonly page: Page;
+  readonly amountInput: Locator;
+  readonly recipientSelect: Locator;
+  readonly descriptionInput: Locator;
+  readonly submitButton: Locator;
+  readonly successMessage: Locator;
+  readonly errorMessage: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.amountInput = page.getByLabel('Amount');
+    this.recipientSelect = page.getByLabel('Recipient');
+    this.descriptionInput = page.getByLabel('Description');
+    this.submitButton = page.getByRole('button', { name: 'Send Payment' });
+    this.successMessage = page.getByTestId('payment-success');
+    this.errorMessage = page.getByTestId('payment-error');
+  }
+
+  async goto() {
+    await this.page.goto('/payments/new');
+    await this.page.waitForLoadState('networkidle');
+  }
+
+  async createPayment(amount: number, recipient: string, description: string) {
+    await this.amountInput.fill(String(amount));
+    await this.recipientSelect.selectOption({ label: recipient });
+    await this.descriptionInput.fill(description);
+    await this.submitButton.click();
+  }
+
+  async expectSuccess() {
+    await expect(this.successMessage).toBeVisible({ timeout: 10000 });
+  }
+
+  async expectError(message: string) {
+    await expect(this.errorMessage).toContainText(message);
+  }
+}
+```
+
+Now tests read like user stories:
+
+```typescript
+test('user can create a payment', async ({ page }) => {
+  const paymentPage = new PaymentPage(page);
+  await paymentPage.goto();
+  await paymentPage.createPayment(250, 'Acme Corp', 'Invoice #789');
+  await paymentPage.expectSuccess();
+});
+
+test('payment fails with invalid amount', async ({ page }) => {
+  const paymentPage = new PaymentPage(page);
+  await paymentPage.goto();
+  await paymentPage.createPayment(-100, 'Acme Corp', 'Test');
+  await paymentPage.expectError('Amount must be positive');
+});
+```
+
+When the UI changes — say, the amount input becomes a custom component with a different label — you update `PaymentPage` once. Every test that uses it stays unchanged.
+
+<Tip>
+Use Playwright's built-in locators (`getByRole`, `getByLabel`, `getByTestId`) instead of CSS selectors. They're more resilient to DOM restructuring and align with how users actually find elements — by role and label, not by class name.
+</Tip>
+
+## Custom Fixtures
+
+Playwright fixtures are dependency injection for tests. They handle setup, teardown, and shared resources without polluting test code.
+
+### Authentication fixture
+
+The most common fixture: a pre-authenticated browser context.
+
+```typescript
+// fixtures/auth.ts
+import { test as base, type Page } from '@playwright/test';
+
+type AuthFixtures = {
+  authenticatedPage: Page;
+  adminPage: Page;
+};
+
+export const test = base.extend<AuthFixtures>({
+  authenticatedPage: async ({ browser }, use) => {
+    const context = await browser.newContext({
+      storageState: 'test/.auth/user.json',
+    });
+    const page = await context.newPage();
+    await use(page);
+    await context.close();
+  },
+
+  adminPage: async ({ browser }, use) => {
+    const context = await browser.newContext({
+      storageState: 'test/.auth/admin.json',
+    });
+    const page = await context.newPage();
+    await use(page);
+    await context.close();
+  },
+});
+
+export { expect } from '@playwright/test';
+```
+
+Generate the storage state once in a global setup:
+
+```typescript
+// global-setup.ts
+import { chromium } from '@playwright/test';
+
+async function globalSetup() {
+  const browser = await chromium.launch();
+
+  const userPage = await browser.newPage();
+  await userPage.goto('/login');
+  await userPage.fill('[name="email"]', 'test@weel.co');
+  await userPage.fill('[name="password"]', process.env.TEST_PASSWORD!);
+  await userPage.click('button[type="submit"]');
+  await userPage.waitForURL('/dashboard');
+  await userPage.context().storageState({ path: 'test/.auth/user.json' });
+
+  const adminPage = await browser.newPage();
+  await adminPage.goto('/login');
+  await adminPage.fill('[name="email"]', 'admin@weel.co');
+  await adminPage.fill('[name="password"]', process.env.TEST_ADMIN_PASSWORD!);
+  await adminPage.click('button[type="submit"]');
+  await adminPage.waitForURL('/dashboard');
+  await adminPage.context().storageState({ path: 'test/.auth/admin.json' });
+
+  await browser.close();
+}
+
+export default globalSetup;
+```
+
+Now every test that needs an authenticated user uses the fixture. Login happens once globally, not per test. At Weel, this saves ~45 seconds per test run.
+
+## Parallel Execution Strategy
+
+Playwright runs test files in parallel by default. To maximise parallelism:
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  workers: process.env.CI ? 4 : 2,
+  retries: process.env.CI ? 2 : 0,
+  reporter: process.env.CI
+    ? [['html'], ['github']]
+    : [['html']],
+
+  use: {
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'on-first-retry',
+  },
+
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' } },
+    { name: 'mobile', use: { ...devices['iPhone 14'] } },
+  ],
+});
+```
+
+<Warning>
+Parallel tests must be independent. If test A creates a user and test B expects that user to exist, parallel execution will produce random failures. Each test should create its own data, interact with it, and clean up. Shared mutable state is the root cause of 90% of flaky E2E tests.
+</Warning>
+
+### Test isolation with API seeding
+
+Instead of using the UI to create test data (slow, fragile), seed data via API calls:
+
+```typescript
+// helpers/seed.ts
+import { request } from '@playwright/test';
+
+export async function seedPaymentData(baseURL: string) {
+  const api = await request.newContext({ baseURL });
+
+  const recipient = await api.post('/api/test/recipients', {
+    data: { name: 'Test Recipient', bsb: '062-000', account: '12345678' },
+  });
+
+  return {
+    recipientId: (await recipient.json()).id,
+  };
+}
+```
+
+## Network Mocking for Speed
+
+Some tests don't need real API calls. For testing UI behaviour — form validation, loading states, error handling — mock the network:
+
+```typescript
+test('shows error state when API fails', async ({ page }) => {
+  await page.route('**/api/payments', (route) => {
+    route.fulfill({
+      status: 500,
+      body: JSON.stringify({ error: 'Internal server error' }),
+    });
+  });
+
+  const paymentPage = new PaymentPage(page);
+  await paymentPage.goto();
+  await paymentPage.createPayment(100, 'Acme Corp', 'Test');
+  await paymentPage.expectError('Something went wrong');
+});
+
+test('shows loading state during submission', async ({ page }) => {
+  await page.route('**/api/payments', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    route.fulfill({ status: 200, body: JSON.stringify({ id: '123' }) });
+  });
+
+  const paymentPage = new PaymentPage(page);
+  await paymentPage.goto();
+  await paymentPage.createPayment(100, 'Acme Corp', 'Test');
+  await expect(page.getByTestId('loading-spinner')).toBeVisible();
+});
+```
+
+## Organising Tests at Scale
+
+At 200+ tests, file organisation matters. Our structure:
+
+```text
+tests/e2e/
+├── fixtures/
+│   ├── auth.ts
+│   └── seed.ts
+├── pages/
+│   ├── PaymentPage.ts
+│   ├── DashboardPage.ts
+│   └── SettingsPage.ts
+├── helpers/
+│   └── api.ts
+├── payments/
+│   ├── create-payment.spec.ts
+│   ├── payment-history.spec.ts
+│   └── payment-approval.spec.ts
+├── auth/
+│   ├── login.spec.ts
+│   └── password-reset.spec.ts
+└── settings/
+    ├── team-management.spec.ts
+    └── billing.spec.ts
+```
+
+Tests are grouped by feature, not by type. When a product engineer works on payments, they find all the payment tests in one place.
+
+## The 80/20 of E2E Testing
+
+You don't need E2E tests for everything. The 80/20 rule: **test the 20% of user journeys that generate 80% of business value.**
+
+At Weel, our critical paths are:
+
+1. User can sign up and complete onboarding
+2. User can create and send a payment
+3. User can approve a payment request
+4. User can generate and export reports
+5. Admin can manage team members and permissions
+
+These five journeys have thorough E2E coverage: happy paths, error paths, edge cases. Everything else — settings pages, profile updates, notification preferences — gets integration test coverage instead.
+
+<Info>
+E2E tests are expensive to write, expensive to maintain, and slow to run. Spend that budget on the journeys that would cause the most damage if they broke. A broken checkout flow costs revenue. A broken profile avatar upload costs a support ticket. Test accordingly.
+</Info>
+
+The difference between an E2E suite that scales and one that collapses is entirely structural. Page objects, fixtures, parallel execution, data isolation — these aren't advanced techniques. They're foundations. Build them from the start, and your suite will still be maintainable at 500 tests.

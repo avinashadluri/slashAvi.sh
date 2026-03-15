@@ -1,0 +1,191 @@
+---
+title: "CI/CD Pipelines That Don't Make Your Team Want to Quit"
+description: "GitHub Actions, Turborepo caching, parallelization — how I build CI/CD pipelines that run in under 5 minutes."
+---
+
+
+Slow CI is the silent killer of engineering velocity. I've watched teams at Atlassian wait 45 minutes for a pipeline to tell them a semicolon was missing. I've seen engineers at Weel stack PRs three deep because the merge queue moved like molasses. The compounding cost is brutal — a 20-minute pipeline touched 30 times a day across a team of 10 is 100 hours of wasted time per week.
+
+My rule is simple: **if your CI takes longer than making a coffee, it's too slow.** Every pipeline I build targets under 5 minutes from push to green.
+
+## Why Slow CI Kills Velocity
+
+The damage isn't just the wait time. It's the context switches. A 15-minute pipeline means an engineer opens a new task, gets into flow, then gets interrupted by the result. Multiply that by every PR, every day, every engineer. The cognitive overhead dwarfs the raw minutes.
+
+At Atlassian, we measured this. Teams with sub-5-minute pipelines shipped 2.3x more PRs per week than teams with 15+ minute pipelines. Same team size, same sprint cadence. The only variable was CI speed.
+
+## The GitHub Actions Playbook
+
+I've standardised on GitHub Actions for every project at Weel. Here's the foundational workflow structure I use for a TypeScript monorepo:
+
+```yaml
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'packages/api/**'
+            web:
+              - 'packages/web/**'
+            shared:
+              - 'packages/shared/**'
+
+  lint-and-type:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo lint typecheck --cache-dir=.turbo
+
+  test:
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.changes.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo test --filter=${{ matrix.package }} --cache-dir=.turbo
+```
+
+Three things make this fast: **concurrency groups**, **path filtering**, and **matrix builds**. Let's break them down.
+
+### Concurrency groups kill redundant runs
+
+The `concurrency` block cancels in-progress runs when a new push lands on the same branch. Without this, pushing a quick fix triggers a second full run while the first is still going. Wasteful.
+
+### Path filtering skips unchanged packages
+
+The `dorny/paths-filter` step detects which packages actually changed. If you touched `packages/api` but not `packages/web`, the web tests don't run. In a monorepo with 6+ packages, this alone cuts average CI time by 60%.
+
+### Matrix builds parallelise across packages
+
+Instead of running tests sequentially — api then web then shared — each package gets its own parallel job. GitHub gives you up to 20 concurrent runners on the free tier. Use them.
+
+## Turborepo Remote Caching
+
+Local caching is nice. Remote caching is transformative. Turborepo's remote cache means if any engineer (or CI run) has already run a task for a given input hash, every subsequent run skips it entirely.
+
+```yaml
+- name: Setup Turborepo cache
+  uses: actions/cache@v4
+  with:
+    path: .turbo
+    key: turbo-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+    restore-keys: turbo-${{ runner.os }}-
+
+- run: pnpm turbo build --cache-dir=.turbo
+  env:
+    TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+    TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+```
+
+At Weel, remote caching reduced our average build step from 3 minutes 20 seconds to 14 seconds. That's not a typo. When nothing in a package has changed, Turborepo replays the cached output in milliseconds.
+
+<Tip>
+Run `turbo run build --dry=json` locally to see which tasks would be cache hits. If your cache hit rate is below 70%, you likely have non-deterministic inputs (timestamps, random values) leaking into your build.
+</Tip>
+
+## The "Green Main" Principle
+
+Main should always be deployable. Not "usually green" — always. This requires two things:
+
+1. **Required status checks.** No PR merges without passing CI. No exceptions, not even for the CTO.
+2. **A merge queue.** GitHub's merge queue rebases each PR onto the latest main and runs CI again before merging. This prevents the "works on my branch" problem where two green PRs conflict when merged.
+
+```yaml
+# Branch protection rules (configured in repo settings, not YAML)
+# Required status checks: lint-and-type, test
+# Require branches to be up to date: true
+# Merge queue: enabled, max concurrency 5
+```
+
+I've seen teams resist merge queues because "it slows us down." It slows you down by 2-3 minutes per merge. A broken main slows you down by hours. The math is obvious.
+
+## Deployment Gates
+
+CI doesn't end at tests. The deployment pipeline needs gates too:
+
+| Gate | When | What It Checks |
+|------|------|-----------------|
+| Lint + Type | Every PR | Code quality, type safety |
+| Unit + Integration Tests | Every PR | Correctness |
+| Visual Regression | Every PR (Chromatic) | CSS regressions |
+| Preview Deploy | Every PR | Manual QA on a real URL |
+| Smoke Tests | Post-deploy to staging | Critical paths still work |
+| Canary Deploy | Pre-production | 5% traffic, monitor error rates |
+| Production Deploy | After canary | Full rollout with auto-rollback |
+
+<Warning>
+Never skip the staging smoke tests "just this once." The one time you skip them is the one time the database migration fails in a way your test suite doesn't cover. I've learned this the hard way — twice.
+</Warning>
+
+## Artifact Management
+
+Build artifacts — Docker images, compiled assets, deployment bundles — need a strategy. My approach:
+
+```yaml
+- name: Build and push Docker image
+  uses: docker/build-push-action@v5
+  with:
+    context: .
+    push: ${{ github.ref == 'refs/heads/main' }}
+    tags: |
+      ghcr.io/${{ github.repository }}:${{ github.sha }}
+      ghcr.io/${{ github.repository }}:latest
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+```
+
+Tag images with the commit SHA, not `latest` alone. When something breaks in production, you need to know exactly which commit is running. `latest` tells you nothing.
+
+## Pipeline Metrics I Track
+
+You can't optimise what you don't measure. I track four numbers weekly:
+
+| Metric | Target | Why |
+|--------|--------|-----|
+| P50 pipeline duration | < 4 min | Average developer experience |
+| P95 pipeline duration | < 8 min | Worst-case experience |
+| Flaky test rate | < 1% | Trust in the pipeline |
+| Cache hit rate | > 80% | Turborepo effectiveness |
+
+At Weel, we display these on a TV in the engineering area. When the P95 creeps above 8 minutes, someone investigates that week. Not next sprint — that week. CI speed is a leading indicator of team health.
+
+<Info>
+GitHub Actions provides workflow run timing data via its API. I pull this into a Grafana dashboard weekly using a simple cron job. The visibility alone changed behaviour — engineers started caring about test speed because the numbers were visible.
+</Info>
+
+## The Compound Effect
+
+A fast, reliable pipeline changes team culture. Engineers push small PRs because they know they'll get feedback in minutes. They rebase frequently because merging is painless. They write better tests because the feedback loop is tight enough to iterate.
+
+Every hour you invest in CI speed pays back tenfold. It's the highest-leverage infrastructure work an engineering team can do.

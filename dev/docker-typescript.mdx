@@ -1,0 +1,227 @@
+---
+title: "Docker for TypeScript Devs: The Only Guide That Doesn't Waste Your Time"
+description: "Multi-stage builds, dev containers, production optimization — Docker patterns specifically for TypeScript/Node.js projects."
+---
+
+
+Most Docker guides are written for Python or Go developers and then hand-wave at Node.js with a `COPY . .` and `npm start`. That's how you end up with 1.2GB images that take 4 minutes to build and include your entire `node_modules` development dependency tree in production.
+
+I've been containerizing TypeScript services since 2018 — first at Atlassian where we ran hundreds of Node.js microservices, now at Weel where every backend service is a Dockerized TypeScript app deployed to ECS. Here's everything I've learned, condensed into the patterns that actually matter.
+
+## Why Docker for TypeScript
+
+Three reasons, and they're not the ones most articles cite:
+
+1. **"Works on my machine" dies.** Node version mismatches, native dependency compilation differences, OS-level library variations — all gone. The container is the contract.
+2. **Production parity.** Your local dev environment runs the same base image as production. No more "it works in dev but the alpine build is missing libvips."
+3. **Deploy anywhere.** ECS, Kubernetes, Cloud Run, Railway — if it runs containers, your app runs there. No vendor lock-in to a specific platform's deployment mechanism.
+
+## The Multi-Stage Dockerfile
+
+This is the Dockerfile I use for every TypeScript service at Weel. Three stages: dependencies, build, and production.
+
+```dockerfile
+# Stage 1: Install dependencies
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+
+# Stage 2: Build TypeScript
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN corepack enable && pnpm build
+RUN pnpm prune --prod
+
+# Stage 3: Production image
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 appuser
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+USER appuser
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+CMD ["node", "dist/index.js"]
+```
+
+Let me explain why each stage matters.
+
+**Stage 1 (deps):** Installs all dependencies in an isolated layer. Because we only copy `package.json` and the lockfile, Docker caches this layer until dependencies actually change. Adding a new source file doesn't invalidate the dependency cache.
+
+**Stage 2 (builder):** Compiles TypeScript and then prunes dev dependencies. The `pnpm prune --prod` step removes everything not needed at runtime — TypeScript itself, testing libraries, linters, build tools.
+
+**Stage 3 (runner):** Copies only the compiled JavaScript and production dependencies into a clean alpine image. No source code, no build tools, no dev dependencies.
+
+<Tip>
+The order of COPY instructions matters enormously for cache efficiency. Always copy files that change least frequently first (lockfile → package.json → source code). A single misordering can turn a 10-second cached build into a 3-minute full rebuild.
+</Tip>
+
+## The .dockerignore That Saves You
+
+Your `.dockerignore` is as important as your `Dockerfile`. Without it, Docker copies everything — including `node_modules`, `.git`, test files, and that 500MB data dump you forgot to delete.
+
+```text
+node_modules
+.git
+.gitignore
+*.md
+.env*
+.turbo
+coverage
+.next
+dist
+docker-compose*.yml
+.vscode
+.idea
+__tests__
+*.test.ts
+*.spec.ts
+.storybook
+```
+
+At Atlassian, one team's Docker build was taking 6 minutes. The culprit? A 2GB `.git` directory being copied into the build context. Adding `.git` to `.dockerignore` dropped it to 45 seconds.
+
+## Docker Compose for Local Development
+
+I don't run anything natively on my machine except the editor. Everything else — the API, the database, Redis, the email service — runs in Docker Compose.
+
+```yaml
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deps
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/app
+      - REDIS_URL=redis://redis:6379
+    command: pnpm dev
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
+```
+
+The key trick is the `target: deps` on the API service, combined with a volume mount. In development, we mount the source code as a volume so changes trigger hot reload — but we use an anonymous volume for `node_modules` to prevent the host's `node_modules` from overriding the container's.
+
+<Warning>
+Never mount `node_modules` from the host into the container. Native dependencies (like `esbuild`, `sharp`, or `bcrypt`) are compiled for your host OS. They'll crash inside the Linux container. The anonymous volume pattern (`/app/node_modules`) keeps container dependencies isolated.
+</Warning>
+
+## Image Size Optimization
+
+Image size matters. Larger images mean slower pulls, slower deployments, and more attack surface. Here's the progression I typically see:
+
+| Approach | Image Size | Notes |
+|----------|-----------|-------|
+| `node:20` + copy everything | ~1.2 GB | Don't do this |
+| `node:20-alpine` + copy everything | ~450 MB | Better, but still wasteful |
+| Multi-stage + alpine + prod deps only | ~120 MB | Good for most services |
+| Multi-stage + distroless | ~80 MB | Best security, harder to debug |
+
+For most services at Weel, the alpine multi-stage approach lands us around 120MB. That's a 10x reduction from the naive approach, and it deploys in seconds instead of minutes.
+
+## Environment Variable Management
+
+Never bake environment variables into the image. The same image should run in development, staging, and production — only the environment variables change.
+
+```typescript
+// config.ts — validate env vars at startup, fail fast
+import { z } from 'zod';
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
+  JWT_SECRET: z.string().min(32),
+  PORT: z.coerce.number().default(3000),
+});
+
+export const config = envSchema.parse(process.env);
+```
+
+This pattern — validating env vars with Zod at startup — has saved us countless hours. If a required variable is missing, the service crashes immediately with a clear error instead of failing unpredictably when the missing variable is first accessed.
+
+## Signal Handling: The Gotcha Nobody Mentions
+
+Node.js inside Docker has a signal handling problem. When Docker sends `SIGTERM` to stop a container, it sends it to PID 1. If PID 1 is `npm start` (which spawns a child Node process), the signal never reaches your application. Docker waits 10 seconds, then sends `SIGKILL`. Your app never gracefully shuts down — open database connections leak, in-flight requests are dropped.
+
+```typescript
+// Graceful shutdown handler
+const server = app.listen(config.PORT);
+
+async function gracefulShutdown(signal: string) {
+  console.log(`Received ${signal}. Starting graceful shutdown...`);
+
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+
+  await db.$disconnect();
+  await redis.quit();
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+```
+
+The fix is twofold: use `CMD ["node", "dist/index.js"]` (exec form, not shell form) so Node is PID 1, and handle `SIGTERM` in your application code.
+
+<Info>
+If you're using `npm start` or `pnpm start` as your CMD, your app is not PID 1 — the package manager is. Switch to the exec form (`CMD ["node", "dist/index.js"]`) to ensure signals reach your application directly.
+</Info>
+
+## The Production Checklist
+
+Every Dockerized TypeScript service at Weel goes through this checklist before shipping:
+
+- Multi-stage build with production-only dependencies
+- Non-root user (`USER appuser`)
+- Health check endpoint wired to `HEALTHCHECK`
+- Graceful shutdown handling for `SIGTERM`
+- `.dockerignore` excludes tests, docs, `.git`, `.env`
+- Environment variables validated at startup with Zod
+- Image scanned with `trivy` for vulnerabilities
+- Image tagged with commit SHA, not just `latest`
+
+That last point is critical. When something breaks in production, you need to trace the running container back to the exact commit. `latest` tells you nothing. `ghcr.io/weel/api:a1b2c3d` tells you everything.

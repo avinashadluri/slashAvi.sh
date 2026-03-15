@@ -1,0 +1,116 @@
+---
+title: "The Senior-to-Staff Gap: The Invisible Skill Nobody Teaches You"
+description: "What changes between senior and staff engineer — the skill shift from execution to multiplication, and how to cross the gap."
+---
+
+The jump from mid-level to senior is mostly about getting better at what you already do. Write better code. Design better systems. Handle more complexity. Ship more reliably. It's a straight line — do more of the same, but harder.
+
+The jump from senior to staff is completely different. It's not a straight line. It's a right turn. The skills that got you promoted to senior are necessary but wildly insufficient for staff. And the worst part? Nobody tells you what the new skills actually are. You're just expected to figure it out, and most people spend years in a frustrating limbo wondering why they're not progressing.
+
+I've been on both sides of this — struggling to cross the gap myself, and later helping other engineers cross it. Here's what I wish someone had laid out for me clearly.
+
+## The Four Shifts
+
+The senior-to-staff transition comes down to four fundamental shifts. Each one requires you to let go of something that made you successful:
+
+| Dimension | Senior Engineer | Staff Engineer |
+|-----------|----------------|----------------|
+| **Scope** | Team-level (your team's codebase, your team's goals) | Org-level (cross-team systems, company-wide direction) |
+| **Output** | Code and systems (measured by what you ship) | Decisions and alignment (measured by what the org ships) |
+| **Communication** | Peers and your manager (technical discussions) | Leadership and cross-functional partners (strategy discussions) |
+| **Impact** | Features and components (individual contribution) | Systems and platforms (organizational contribution) |
+
+Let me unpack each one, because the devil is in the details.
+
+### Scope: Team → Org
+
+As a senior engineer, you own your team's technical quality. You know the codebase intimately, you set patterns, you make sure things are built right. That's good. But staff-level scope means thinking about how your team's work fits into the broader system.
+
+At Atlassian, I watched a senior engineer build an absolutely beautiful caching layer for their service. Perfectly designed, well-tested, great performance. One problem: three other teams were building their own caching layers at the same time, all slightly different, all solving the same problem. A staff engineer would have seen the org-level pattern and proposed a shared solution before anyone started building.
+
+<Info>
+Expanding your scope doesn't mean abandoning depth. It means developing the peripheral vision to see how your deep expertise connects to problems outside your immediate team.
+</Info>
+
+### Output: Code → Decisions
+
+This is the one that breaks people. Your identity as a senior engineer is built on your ability to ship excellent code. At staff level, your most valuable output is often a decision — or preventing a bad one.
+
+I've had weeks where my most impactful contribution was a single comment on a design doc that redirected a team away from an approach that would have created six months of tech debt. No code written. No PR merged. Just the right observation at the right time, informed by broad enough context to see the risk.
+
+### Communication: Peers → Leadership
+
+Senior engineers communicate mostly within their technical peer group. Staff engineers need to communicate up, down, and across. You need to explain complex technical trade-offs to a VP who hasn't written code in a decade. You need to translate business strategy into technical direction for your engineering peers. You need to build relationships with staff engineers on other teams to align on shared problems.
+
+### Impact: Features → Systems
+
+Senior engineers ship features. Staff engineers shape the systems that features are built on. This means your work often has no direct user-facing impact — and that can feel existential if you're used to pointing at a product and saying "I built that."
+
+## Demonstrating Staff Work Before Getting the Title
+
+Here's the uncomfortable truth about promotions: you generally need to be doing the job before you get the title. Most companies won't promote you to staff on potential — they want evidence that you're already operating at that level.
+
+This creates a chicken-and-egg problem. How do you do staff-level work without staff-level scope?
+
+The answer is to find the gaps. Every organization has problems that fall between teams, decisions that nobody is making, and coordination that nobody is doing. That's your opportunity.
+
+At Weel, before I had any formal staff scope, I noticed that three teams were duplicating API client code. Nobody owned the problem because it spanned team boundaries. I wrote a proposal, built a shared package, migrated the most critical consumers, and documented the approach. That was staff-level work — cross-team problem identification, solution design, and execution — done entirely on my own initiative.
+
+<Tip>
+Keep a "brag document" that tracks your cross-team impact, decisions you influenced, and systems-level thinking. When promotion time comes, this is infinitely more valuable than a list of PRs you merged.
+</Tip>
+
+## The Glue Work Trap
+
+Here's where it gets tricky. There's a category of work that looks like staff-level contribution but isn't recognized as such: glue work. Organizing meetings, writing docs nobody reads, onboarding new hires, fixing flaky tests, maintaining build pipelines. This work is essential, and disproportionately done by people from underrepresented groups.
+
+The trap is this: glue work is necessary for the org to function, but it's often invisible to promotion committees. If you spend all your time doing glue work, you'll be praised informally ("we couldn't do it without you!") but not promoted formally.
+
+The distinction is intentionality and scope. Fixing a flaky test is glue work. Designing a testing strategy that eliminates flaky tests org-wide is staff work. Onboarding one new hire is glue work. Creating an onboarding program that reduces ramp-up time across all teams is staff work.
+
+<Warning>
+If your manager can't articulate how your current work maps to staff-level expectations, that's a red flag. Either the expectations aren't clear, or your work isn't aligned with them. Have this conversation explicitly and early.
+</Warning>
+
+## Building the Promotion Case
+
+Promotion to staff is not purely meritocratic. I wish it were, but it's not. You need a case, and that case needs sponsors.
+
+Here's what a strong staff promotion case looks like:
+
+1. **A pattern of org-level impact** — not one big project, but a sustained track record of thinking and operating beyond your team
+2. **Evidence of technical leadership** — RFCs you authored, architectural decisions you drove, design reviews that redirected work
+3. **Peer recognition** — other engineers (especially on other teams) citing your influence on their work
+4. **A sponsor** — at least one senior leader who can advocate for you in a room you're not in
+5. **The right opportunity** — a role or project that demands staff-level work and makes the business case for the level
+
+Number five is the uncomfortable one. Some organizations simply don't have enough staff-level problems to justify more staff engineers. If that's your situation, the honest answer might be that you need to change organizations.
+
+## The Role of Writing
+
+I keep coming back to this because it's the most underrated skill in the senior-to-staff transition. At senior level, you can get by with verbal communication — whiteboard sessions, Slack discussions, meeting conversations. At staff level, you need to write clearly and persuasively because your ideas need to travel farther than your voice can carry.
+
+Your RFC needs to convince engineers on a team you've never met. Your strategy doc needs to hold up in a leadership review you're not invited to. Your architecture decision record needs to make sense to someone reading it two years from now.
+
+Writing forces clarity of thought in a way that conversation doesn't. If you can't write a clear, compelling argument for your technical direction, you probably haven't thought it through enough.
+
+## Common Mistakes
+
+I've seen the same mistakes repeatedly from senior engineers reaching for staff:
+
+| Mistake | Why It Happens | What to Do Instead |
+|---------|---------------|-------------------|
+| Going deeper instead of broader | Depth is your comfort zone | Deliberately seek cross-team problems |
+| Waiting for permission | Senior work is assigned; staff work is found | Identify gaps and propose solutions proactively |
+| Solving everything yourself | You're fast and capable | Solve through others; teach, delegate, enable |
+| Ignoring organizational dynamics | "Politics" feels dirty | Learn how decisions get made and work within that system |
+| Neglecting writing | You'd rather code | Treat writing as a core deliverable, not overhead |
+| Optimizing for being right | Technical correctness feels safe | Optimize for being effective — right answer nobody adopts is worthless |
+
+## The Mindset Shift
+
+The deepest change in the senior-to-staff transition isn't a skill — it's a mindset. You have to stop measuring your value by what you personally produce and start measuring it by what you enable. That's genuinely hard. It means some days you'll feel like you accomplished nothing because you didn't write any code, even though you unblocked three teams and prevented a bad architectural decision.
+
+At Atlassian, it took me almost a year to stop feeling guilty about days without commits. At Weel, the feedback loop was faster because the team was smaller and I could see my organizational impact more directly. But in both cases, the fundamental shift was the same: from craftsperson to catalyst.
+
+If you're a senior engineer reading this and feeling like the gap is enormous — it is. But it's also crossable. Start expanding your scope intentionally, start writing more, start looking for problems between teams, and start measuring yourself by your multiplier effect rather than your individual output. The gap will close faster than you think.

@@ -1,0 +1,192 @@
+---
+title: "Why 80% of Design Systems Get Abandoned (And How to Not Be One)"
+description: "The adoption problem, the governance problem, and the political problem — why design systems fail and the playbook for making yours stick."
+---
+
+
+I've watched five design systems die. Not dramatically — they didn't crash or get deleted. They just slowly became irrelevant. Usage plateaued. Teams forked components. New hires didn't know the system existed. The Figma library drifted from the code. Eventually someone asked "do we still have a design system?" and the answer was a shrug.
+
+At Atlassian, I worked adjacent to one of the most successful design systems in the industry — the Atlassian Design System, used by thousands of engineers across dozens of products. At Weel, I built a design system from scratch for a team of 30. The lessons from both are the same: **design systems don't fail because of technology. They fail because of adoption, governance, and politics.** In that order.
+
+## Why 80% Fail
+
+The failure pattern is so predictable I can set my watch by it:
+
+**Month 1-3: The Build.** A dedicated team builds a Figma library, a component library, a Storybook, and a documentation site. Spirits are high. The design system gets a cool name, maybe a logo.
+
+**Month 4-6: The Launch.** The system is announced at an all-hands. Product teams are told to use it. Some early adopters pick it up. The component coverage looks promising in dashboards.
+
+**Month 7-12: The Friction.** Product teams hit limitations. The `Table` component doesn't support their sorting pattern. The `Modal` doesn't handle multi-step flows. The `DatePicker` doesn't support their locale. They ask for changes. The design system team has a backlog. Priorities conflict.
+
+**Month 12-18: The Fork.** Rather than wait, product teams copy components and modify them. Now there are two implementations of `Button`. Then three. The design system team tracks "adoption" but the real metric — actual usage — is declining.
+
+**Month 18+: The Shrug.** The design system team is downsized because "adoption didn't justify the investment." The remaining components become legacy code. Nobody maintains them. The next rewrite starts from scratch.
+
+The root cause is always one of three things: the system didn't solve real problems (adoption failure), nobody decided who controls what (governance failure), or the system team couldn't navigate competing priorities (political failure).
+
+## The Adoption Curve
+
+Design system adoption follows the same diffusion curve as any technology:
+
+| Stage | Audience | % of Engineers | What They Need |
+|-------|----------|---------------|----------------|
+| Innovators | DS team, framework enthusiasts | 5% | They'll use anything new |
+| Early Adopters | Teams starting new projects, frontend-heavy teams | 15% | Good docs, clear migration path |
+| Early Majority | Teams with existing code, moderate frontend complexity | 35% | Proven value, easy migration, codemods |
+| Late Majority | Backend-heavy teams, teams with custom UI legacy | 35% | Zero-effort adoption, management mandate |
+| Laggards | Teams with "good enough" custom solutions | 10% | Don't waste energy here (yet) |
+
+Most design system teams build for innovators, launch to everyone, and wonder why the majority doesn't adopt. The early majority needs proof that the system works in production, a clear migration path from their existing code, and documentation good enough to replace Stack Overflow.
+
+<Info>
+At Weel, we didn't announce the design system until three product teams were already using it successfully. Their testimonials and real productivity gains were more persuasive than any all-hands presentation.
+</Info>
+
+## Making Adoption Easy
+
+The number one predictor of adoption is friction. How many steps does it take to go from "I want to use the design system" to "I've shipped a feature using the design system"?
+
+### Documentation that enables
+
+Every component needs three things:
+
+1. **A copy-paste example that works.** Not a contrived example — a real-world example that looks like actual product code. If an engineer can copy the example, change the props, and ship, you've won.
+2. **A props table with defaults.** Auto-generated from TypeScript types. If the engineer has to read the source code to understand the API, your documentation has failed.
+3. **A "when to use this" section.** Engineers often don't know which component to reach for. "Use `Dialog` for confirmations, `Sheet` for forms, `Modal` for complex multi-step flows" prevents wrong choices.
+
+### Migration codemods
+
+If teams have existing UI code, migration is the barrier. Codemods lower that barrier from "rewrite the component" to "run a script":
+
+```typescript
+// codemod: migrate from custom Button to DS Button
+import type { API, FileInfo } from 'jscodeshift';
+
+export default function transform(file: FileInfo, api: API) {
+  const j = api.jscodeshift;
+  const root = j(file.source);
+
+  root.find(j.ImportDeclaration, {
+    source: { value: '../components/Button' },
+  }).forEach((path) => {
+    path.node.source.value = '@company/ui';
+  });
+
+  root.findJSXElements('Button').forEach((path) => {
+    const attrs = path.node.openingElement.attributes;
+
+    const typeProp = attrs?.find(
+      (a) => a.type === 'JSXAttribute' && a.name.name === 'type'
+    );
+    if (typeProp && typeProp.type === 'JSXAttribute') {
+      typeProp.name.name = 'variant';
+    }
+  });
+
+  return root.toSource();
+}
+```
+
+At Atlassian, the design system team maintained a codemod for every breaking change. Teams ran `npx @atlassian/ds-codemod migrate-button-v3` and 90% of the migration was automated. Without codemods, adoption of new versions would have been a fraction of what it was.
+
+## Governance Models
+
+Governance answers three questions: who decides what enters the system, who can contribute, and how are conflicts resolved.
+
+| Model | Description | Best For | Risk |
+|-------|-------------|----------|------|
+| Centralized | DS team builds and maintains everything | Small orgs (<50 eng), early stage systems | Bottleneck on DS team, slow iteration |
+| Federated | Any team can contribute, DS team reviews | Large orgs, mature systems | Quality inconsistency, review overhead |
+| Hybrid | DS team owns core primitives, product teams own domain components | Mid-size orgs, growing systems | Requires clear boundaries and RFC process |
+
+I recommend starting centralized and evolving to hybrid. In the first 6 months, the DS team needs to move fast and establish quality standards. After that, opening contributions keeps the system relevant to real product needs.
+
+### The contribution contract
+
+Make it crystal clear what "contributing" means:
+
+```text
+## Contributing a Component
+
+Prerequisites:
+- Component is needed by 2+ teams (or has validated future need)
+- Design specs exist in the Figma component library
+- You've discussed the API with the DS team
+
+Your PR must include:
+- [ ] Component + TypeScript types (no `any`)
+- [ ] Storybook stories (default state + all variants + interactive)
+- [ ] Unit tests (>80% coverage for component logic)
+- [ ] Accessibility: axe clean, keyboard navigation, ARIA attributes
+- [ ] Documentation page with props table and usage examples
+- [ ] Changeset entry
+
+Review SLA: 2 business days for initial feedback
+```
+
+<Warning>
+If your contribution review takes more than a week, contributors will stop contributing. The review SLA is a promise, and breaking it tells the organization that contributions aren't valued. Track review turnaround and treat delays as a team priority.
+</Warning>
+
+## Measuring Adoption
+
+You can't improve what you don't measure. But most teams measure the wrong thing — component count instead of component usage.
+
+### The adoption maturity table
+
+| Level | Name | Description | Metric |
+|-------|------|-------------|--------|
+| 0 | Absent | No design system | — |
+| 1 | Built | Components exist in a library | Component count |
+| 2 | Used | Some teams use some components | Import count / team |
+| 3 | Preferred | Teams default to DS, custom is the exception | DS imports / total UI imports > 60% |
+| 4 | Standard | All new features use DS, legacy is actively migrated | DS imports / total > 80%, design debt trending down |
+| 5 | Integrated | DS is part of the platform (linting, CI checks, design-code sync) | Automated enforcement, zero design drift |
+
+Most teams celebrate reaching Level 2 and stop measuring. The real value is in Levels 3-5, where the design system has become the default way to build UI.
+
+### Quantitative tracking
+
+```typescript
+// Script to track adoption metrics weekly
+interface AdoptionMetrics {
+  dsImports: number;
+  customImports: number;
+  coverageRatio: number;
+  tokenUsage: number;
+  hardcodedValues: number;
+  tokenRatio: number;
+}
+
+async function calculateAdoption(srcPath: string): Promise<AdoptionMetrics> {
+  const dsImports = await countImports(srcPath, '@company/ui');
+  const customImports = await countImports(srcPath, './components');
+  const tokenUsage = await countTokenUsage(srcPath);
+  const hardcodedValues = await countHardcodedColors(srcPath);
+
+  return {
+    dsImports,
+    customImports,
+    coverageRatio: dsImports / (dsImports + customImports),
+    tokenUsage,
+    hardcodedValues,
+    tokenRatio: tokenUsage / (tokenUsage + hardcodedValues),
+  };
+}
+```
+
+## The Political Playbook
+
+Design systems are cross-cutting. Cross-cutting work lives and dies by political navigation.
+
+**Frame it as velocity, not consistency.** "Design consistency" doesn't get budget approved. "Teams ship features 25% faster and UI bugs drop 40%" does. At Weel, I tracked feature delivery speed before and after design system adoption. The data convinced leadership to invest in a dedicated maintainer.
+
+**Find your champion teams.** Don't try to convince everyone simultaneously. Find two teams that are actively struggling with UI work — building the same datatable for the third time, debugging CSS specificity conflicts, failing accessibility audits. Help those teams first. Their success stories sell the system better than any presentation.
+
+**Handle resistance with curiosity.** When a senior engineer says "I don't need a design system," the response isn't to argue. It's to ask what problems they're solving in their UI code and how. Often, they've built their own micro-system. Acknowledge that, and show how the design system solves the same problems with less maintenance burden.
+
+<Tip>
+The strongest signal of a healthy design system is what happens when a team can't find the component they need. In a failing system, they build a custom one. In a thriving system, they file a request or contribute one. That instinct — reaching for the system first — is the culture shift that makes a design system permanent.
+</Tip>
+
+Design systems are not libraries. They're not even products. They're agreements — between design and engineering, between teams, between present and future. The technology is the easy part. Making those agreements stick is the work.

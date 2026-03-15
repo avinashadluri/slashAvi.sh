@@ -1,0 +1,229 @@
+---
+title: "Visual Regression Testing: Catching the Bugs QA Can't Put Into Words"
+description: "Chromatic, Playwright screenshots, and the visual testing pipeline that catches CSS regressions before users do."
+---
+
+
+"Something looks... off." That's the bug report. No steps to reproduce. No expected vs actual. Just a vague sense that something changed. Because CSS regressions are invisible to your test suite. Your unit tests pass. Your integration tests pass. Your E2E tests pass. But a padding change cascaded through 15 components and now the checkout page looks broken on mobile.
+
+I've shipped these bugs. At Atlassian, a seemingly innocent CSS refactor in the design system broke the visual alignment of every page that used the `Stack` component. Zero test failures. 47 customer complaints. The fix took 10 minutes. The reputational damage took weeks to repair.
+
+Visual regression testing catches these bugs automatically. It takes screenshots of your UI, compares them against baselines, and flags any pixel differences for human review. It's the testing layer that catches what code-level tests fundamentally cannot.
+
+## The Problem: CSS Changes Break Silently
+
+CSS is the most fragile layer of any web application. A single change can cascade through the entire UI in ways that are impossible to predict:
+
+- Changing a margin in a shared layout component shifts everything downstream
+- Updating a design token changes every component that references it
+- A font-weight change alters text wrapping, which changes element heights, which breaks a layout
+- Z-index wars between overlapping components create invisible bugs
+
+Traditional tests can't catch these. Testing Library asserts on DOM structure, not visual rendering. Playwright can assert on element positions, but you'd need thousands of assertions to cover every possible visual state. And you'd still miss the subtle ones — the 2px shift, the wrong border-radius, the colour that's slightly different from the design spec.
+
+## Visual Testing Tools: My Honest Ranking
+
+I've used three tools in production. Here's my real-talk assessment:
+
+| Tool | Best For | Cost | Setup Effort | CI Integration |
+|------|----------|------|-------------|----------------|
+| Chromatic | Storybook-based projects, design systems | $$$ (free tier limited) | Low — plugs into Storybook | Excellent |
+| Percy (BrowserStack) | Full-page testing, non-Storybook projects | $$$ | Medium | Good |
+| Playwright Screenshots | Budget-conscious, already using Playwright | Free | Higher — DIY comparison | Manual |
+
+At Weel, we use **Chromatic for the design system** (component-level) and **Playwright screenshots for critical pages** (page-level). This two-layer approach catches component regressions early in the Storybook pipeline and catches page-level layout issues in E2E.
+
+## The Storybook + Chromatic Pipeline
+
+Every component in our design system has Storybook stories. Chromatic captures screenshots of every story in every viewport on every PR.
+
+```typescript
+// Button.stories.tsx
+import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from './Button';
+
+const meta: Meta<typeof Button> = {
+  title: 'Components/Button',
+  component: Button,
+  parameters: {
+    chromatic: {
+      viewports: [320, 768, 1200],
+      diffThreshold: 0.2,
+    },
+  },
+};
+export default meta;
+
+type Story = StoryObj<typeof Button>;
+
+export const AllVariants: Story = {
+  render: () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <Button variant="primary">Primary</Button>
+      <Button variant="secondary">Secondary</Button>
+      <Button variant="ghost">Ghost</Button>
+      <Button variant="danger">Danger</Button>
+      <Button variant="primary" disabled>Disabled</Button>
+      <Button variant="primary" isLoading>Loading</Button>
+    </div>
+  ),
+};
+
+export const Sizes: Story = {
+  render: () => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <Button size="sm">Small</Button>
+      <Button size="md">Medium</Button>
+      <Button size="lg">Large</Button>
+    </div>
+  ),
+};
+```
+
+The CI integration is straightforward:
+
+```yaml
+# .github/workflows/chromatic.yml
+name: Chromatic
+on: pull_request
+
+jobs:
+  chromatic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - uses: chromaui/action@latest
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          exitZeroOnChanges: true
+          autoAcceptChanges: main
+```
+
+When a PR introduces a visual change, Chromatic generates a diff — highlighting exactly which pixels changed, in which component, at which viewport. The reviewer sees a side-by-side comparison and either accepts (updating the baseline) or rejects (flagging a regression).
+
+<Tip>
+Set `autoAcceptChanges: main` so that merges to main automatically update baselines. Without this, you'll accumulate baseline drift that makes every subsequent PR show phantom changes.
+</Tip>
+
+## Playwright Visual Testing for Pages
+
+Component-level testing catches design system regressions, but page-level testing catches layout and composition issues. We use Playwright's built-in screenshot comparison for critical pages:
+
+```typescript
+// tests/visual/checkout.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Checkout page visual regression', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedTestData();
+    await loginAsTestUser(page);
+  });
+
+  test('checkout form default state', async ({ page }) => {
+    await page.goto('/checkout');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page).toHaveScreenshot('checkout-default.png', {
+      maxDiffPixelRatio: 0.01,
+      animations: 'disabled',
+    });
+  });
+
+  test('checkout form with validation errors', async ({ page }) => {
+    await page.goto('/checkout');
+    await page.click('[data-testid="submit-payment"]');
+
+    await expect(page).toHaveScreenshot('checkout-errors.png', {
+      maxDiffPixelRatio: 0.01,
+    });
+  });
+
+  test('checkout responsive mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/checkout');
+
+    await expect(page).toHaveScreenshot('checkout-mobile.png', {
+      maxDiffPixelRatio: 0.02,
+    });
+  });
+});
+```
+
+### Handling dynamic content
+
+Screenshots with dynamic content (dates, avatars, user names, random IDs) will produce false diffs every run. Handle these systematically:
+
+```typescript
+// Mask dynamic elements before screenshot
+async function prepareForScreenshot(page: Page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-testid="timestamp"]').forEach((el) => {
+      el.textContent = '1 Jan 2024, 12:00 PM';
+    });
+
+    document.querySelectorAll('[data-testid="avatar"]').forEach((el) => {
+      (el as HTMLImageElement).src = '/test-fixtures/placeholder-avatar.png';
+    });
+
+    document.querySelectorAll('[data-testid="random-id"]').forEach((el) => {
+      el.textContent = 'ID-XXXXX';
+    });
+  });
+}
+```
+
+<Warning>
+Dynamic content is the number one cause of flaky visual tests. Before writing off visual testing as "too flaky," audit your screenshots for timestamps, animated elements, randomly generated content, and third-party widgets. Fix these systematically with masking or deterministic test data, and flakiness drops to near zero.
+</Warning>
+
+## Threshold Tuning
+
+The `maxDiffPixelRatio` parameter controls how many pixels can change before the test fails. Too strict (0.001) and font rendering differences across CI environments create false positives. Too loose (0.1) and real regressions slip through.
+
+My recommendations:
+
+| Context | Threshold | Why |
+|---------|-----------|-----|
+| Design system components | 0.2% (`0.002`) | Components should be pixel-precise |
+| Full page screenshots | 1% (`0.01`) | Allow for minor rendering differences |
+| Responsive layouts | 2% (`0.02`) | Mobile viewports have more variance |
+| Pages with third-party embeds | 5% (`0.05`) | External content is unpredictable |
+
+Start strict and loosen only when you encounter false positives. Every threshold increase is a decision to accept more visual drift.
+
+## The Review Workflow
+
+Visual diffs need human review. Automated approval defeats the purpose. Our workflow:
+
+1. **PR opens** — Chromatic and Playwright visual tests run automatically
+2. **Changes detected** — GitHub check goes to "pending review"
+3. **Author reviews** — if the changes are intentional (a design update), they approve in Chromatic's UI
+4. **Reviewer confirms** — a second pair of eyes on visual changes, just like code review
+5. **Baselines update** — approved diffs become the new baseline on merge
+
+At Weel, we require visual review approval before merge for any PR that touches CSS, design tokens, or component markup. This sounds heavy but takes 2-3 minutes per PR. The bugs it prevents would take hours to diagnose and fix.
+
+## Cost-Benefit Analysis
+
+Visual testing isn't free. Chromatic charges per snapshot. Playwright screenshots add CI minutes. Review workflows add process overhead. Is it worth it?
+
+| Cost | Benefit |
+|------|---------|
+| ~$150/month for Chromatic (our usage) | Caught 12 visual regressions in 6 months that would've shipped |
+| ~3 min added to CI per PR | Zero CSS-related customer complaints since adoption |
+| ~2-3 min review time per PR | Design-engineering alignment improved measurably |
+
+At Atlassian, the design system team estimated that visual regressions cost an average of 4 engineering hours each to diagnose, fix, and deploy. At 2-3 regressions per month, that's 8-12 hours saved against 3-4 hours of visual review overhead. The math works.
+
+<Info>
+The non-obvious benefit: visual testing changes how engineers write CSS. When you know every pixel change will be reviewed, you become more intentional about visual changes. You stop making "drive-by" CSS tweaks. You isolate visual changes into dedicated PRs. The quality of CSS in the codebase improves because visibility creates accountability.
+</Info>
+
+Visual regression testing is the testing layer I wish I'd adopted five years earlier. It catches the bugs that make users lose trust — the kind where everything "works" but nothing looks right.

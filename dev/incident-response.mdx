@@ -1,0 +1,172 @@
+---
+title: "Incident Response: The First 15 Minutes That Define Everything"
+description: "A real incident playbook — detection, triage, communication, resolution, and the postmortem process that prevents repeat incidents."
+---
+
+
+At 2:47 AM on a Tuesday, I got paged. Payment processing was down at Weel. Real money, real customers, real consequences. The next 15 minutes determined whether this was a 20-minute incident or a 4-hour disaster.
+
+Those first 15 minutes are the most important minutes in any incident. Not because that's when you fix things — it's when you set the trajectory. Good first 15 minutes: clear ownership, fast triage, calm communication. Bad first 15 minutes: confusion, panic, three engineers debugging the same thing while nobody talks to the customer-facing team.
+
+Here's the playbook I've built across incidents at Atlassian (where incidents are a weekly occurrence at scale) and Weel (where every incident is existential because we handle financial transactions).
+
+## The Timeline: What Happens When
+
+| Time | Action | Owner |
+|------|--------|-------|
+| T+0 | Alert fires, on-call acknowledges | On-call engineer |
+| T+2 min | Severity assessment (SEV1-4) | On-call engineer |
+| T+3 min | Incident channel created, roles assigned | On-call engineer |
+| T+5 min | First status update to stakeholders | Incident communicator |
+| T+10 min | Initial hypothesis formed, first mitigation attempted | Resolver(s) |
+| T+15 min | Escalation decision — do we need more people? | Incident commander |
+| T+30 min | Second status update, refined diagnosis | Communicator |
+| T+60 min | Hourly updates until resolution | Communicator |
+| Resolution | Final update, incident channel archived | Commander |
+| T+48 hrs | Postmortem written and reviewed | All participants |
+
+This timeline isn't aspirational — it's practiced. We run incident drills quarterly at Weel where we simulate failures and practice this exact flow. The first time you follow the playbook shouldn't be during a real incident.
+
+## Severity Levels
+
+Get this wrong and you either wake up the CTO for a broken tooltip or let a payments outage simmer while one engineer casually investigates.
+
+| Severity | Description | Response | Example |
+|----------|-------------|----------|---------|
+| SEV1 | Customer-facing outage, data loss risk, financial impact | All hands, war room, exec communication | Payment processing down |
+| SEV2 | Major feature degraded, affecting many users | On-call + team lead, regular status updates | Search returning stale results |
+| SEV3 | Minor feature broken, workaround exists | On-call investigates during business hours | CSV export timing out for large datasets |
+| SEV4 | Cosmetic issue, no functional impact | Ticket created, fixed in normal sprint | Button misaligned on settings page |
+
+<Warning>
+When in doubt, escalate up. A SEV2 that gets upgraded to SEV1 after 30 minutes wastes 30 minutes. A SEV1 that gets downgraded to SEV2 after 5 minutes wastes 5 minutes. Always err on the side of higher severity.
+</Warning>
+
+## The Three Roles
+
+Every incident needs exactly three roles. Not five, not "everyone jump in" — three.
+
+**Incident Commander (IC):** Owns the incident. Makes decisions about escalation, mitigation strategy, and when to declare resolution. Doesn't debug — coordinates. At Weel, the on-call engineer is the IC by default but can hand off if they need to be the resolver.
+
+**Communicator:** Writes status updates. Handles Slack messages to stakeholders, updates the status page, and fields questions from non-engineering teams. This role exists so the resolver can focus on fixing things without being interrupted by "what's the ETA?"
+
+**Resolver:** The engineer(s) actually debugging and fixing the issue. They share findings in the incident channel but don't write external communications.
+
+<Tip>
+The communicator role is the most undervalued and most impactful. At Atlassian, incidents with a dedicated communicator resolved 40% faster — not because communication fixes bugs, but because it frees the resolver from context-switching to answer "are we fixed yet?" every 3 minutes.
+</Tip>
+
+## Communication Templates
+
+Under stress, people write terrible updates. "We're looking into it" tells stakeholders nothing. Templates solve this.
+
+### First status update (T+5 min)
+
+```text
+🔴 INCIDENT: [Brief description]
+Severity: SEV[1-4]
+Impact: [Who is affected and how]
+Status: Investigating
+Commander: @[name]
+
+We detected [what happened] at [time]. We are currently investigating
+the root cause. [Number] customers are affected. Next update in 25 minutes.
+```
+
+### Progress update (T+30 min, then hourly)
+
+```text
+🟡 UPDATE: [Brief description]
+Status: [Investigating / Identified / Mitigating / Resolved]
+
+What we know: [Current understanding of the issue]
+What we're doing: [Specific mitigation steps in progress]
+Impact: [Updated scope — better or worse than initial assessment?]
+ETA: [Honest estimate, or "unknown — will update in 30 min"]
+```
+
+### Resolution update
+
+```text
+🟢 RESOLVED: [Brief description]
+Duration: [Total time from detection to resolution]
+Root cause: [One sentence]
+Customer impact: [Who was affected, for how long]
+
+A full postmortem will be published within 48 hours.
+```
+
+## War Room Etiquette
+
+When multiple people are in an incident channel, things get chaotic fast. Rules I enforce:
+
+1. **Prefix messages with your role.** `[RESOLVER] Checking database connection pool metrics` vs `[COMMS] Posting update to status page`. This prevents crosstalk.
+2. **No drive-by debugging.** If you're not assigned as a resolver, don't start running queries or pushing fixes. Coordinate with the IC first.
+3. **Thread long investigations.** The main channel should be a clean timeline. Deep dives go in threads.
+4. **Say what you're doing before you do it.** "I'm going to restart the API pods" gives the IC a chance to say "wait, let me capture metrics first."
+5. **Update regularly even when nothing has changed.** Silence during an incident is terrifying. "Still investigating, no new findings" is better than nothing for 20 minutes.
+
+## The Postmortem That Prevents Repeats
+
+Most postmortems are useless. They describe what happened, assign vague action items like "improve monitoring," and are never read again. Here's the structure that actually works:
+
+```text
+## Incident: [Title]
+Date: [Date] | Duration: [Time] | Severity: SEV[X]
+Author: [Name] | Reviewers: [Names]
+
+## Summary
+[2-3 sentences: what happened, who was affected, how it was resolved]
+
+## Impact
+- Users affected: [number]
+- Revenue impact: [amount or "none"]
+- Duration of customer impact: [time]
+
+## Timeline (UTC)
+- 02:47 — Alert: API error rate exceeded 5% threshold
+- 02:49 — On-call acknowledged, opened incident channel
+- 02:52 — Identified: connection pool exhaustion on payments-db
+- 02:55 — First status update posted
+- 03:01 — Mitigation: increased connection pool limit from 20 to 50
+- 03:05 — Error rate dropping, monitoring
+- 03:15 — Confirmed resolved, all metrics nominal
+
+## Root Cause
+[Detailed technical explanation. Not "the database was slow" but
+"a query introduced in PR #1234 performed a full table scan on the
+transactions table (4.2M rows) without an index on the created_at
+column, exhausting the connection pool during peak hours."]
+
+## What Went Well
+- Alert fired within 2 minutes of impact starting
+- On-call had relevant runbook for connection pool issues
+- Mitigation was applied in under 15 minutes
+
+## What Didn't Go Well
+- The problematic query was not caught in code review
+- No load testing was performed on the new endpoint
+- Status page update was delayed by 10 minutes
+
+## Action Items
+| Action | Owner | Due Date | Ticket |
+|--------|-------|----------|--------|
+| Add index on transactions.created_at | @sarah | 2024-03-15 | ENG-1234 |
+| Add query performance linting to CI | @avi | 2024-03-22 | ENG-1235 |
+| Load test all new database queries | @team | 2024-04-01 | ENG-1236 |
+```
+
+<Info>
+The action items section is the only part of the postmortem that matters long-term. Every action item needs an owner, a due date, and a ticket. "Improve monitoring" is not an action item. "Add alert for connection pool utilization above 80%, owned by @avi, due March 15, tracked in ENG-1234" is an action item.
+</Info>
+
+## Building an Incident Culture
+
+The hardest part of incident response isn't the process — it's the culture. Blameless postmortems sound nice in theory. In practice, they require active enforcement:
+
+- **Never ask "who broke this?"** Ask "what made this breakage possible?" The human who wrote the bug is the least interesting factor. The system that allowed it to reach production is the interesting factor.
+- **Celebrate fast detection and clean response.** At Weel, we have a `#incident-wins` channel where we highlight incidents that were handled well. The message isn't "we had fewer incidents" — it's "we responded to this incident in 4 minutes and zero customers noticed."
+- **Make incident participation career-positive.** If someone runs a great incident, mention it in their performance review. If on-call work is invisible, people will avoid it.
+- **Review postmortem action items monthly.** Assign an engineering manager to track completion. Incomplete action items from postmortems are the number one way incidents repeat.
+
+The goal isn't zero incidents — that's impossible at scale. The goal is that every incident makes the system more resilient, and no incident happens the same way twice.
