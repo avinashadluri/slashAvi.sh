@@ -1,183 +1,119 @@
 ---
-title: "Micro Frontends at Atlassian Scale: When to Split, When to Stay"
+title: "Micro Frontends at Scale: When to Split, When to Stay"
 description: "The honest guide to micro frontends — when the complexity is worth it, when a monolith is better, and the decision matrix I use."
 ---
 
+Micro frontends are one of the most oversold patterns in frontend engineering. Every conference talk makes them sound inevitable — the natural evolution of any serious web application. But after working on products where micro frontends were a genuine survival strategy and products where they were a premature optimization that created years of pain, I can tell you: **most teams shouldn't do micro frontends.** And the ones that should need to go in with eyes wide open about the real costs.
 
-I spent years at Atlassian working on products where micro frontends weren't a buzzword — they were a survival strategy. When you have 200+ engineers contributing to a single web application, a monolithic frontend doesn't break because of technical limitations. It breaks because of organizational ones. Merge conflicts in shared files. Deployment queues that take days. One team's broken CSS cascading into another team's feature.
+This page is an honest accounting of both sides. No vendor pitches. No "we adopted micro frontends and everything was amazing." Just the trade-offs.
 
-But here's the thing most micro frontend advocates won't tell you: **the cure is often worse than the disease**. I've seen teams adopt micro frontends at 10-person scale and drown in the infrastructure complexity that exists to solve a 200-person problem. This page is my honest accounting of both sides.
+![Architecture and building structure](https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=80)
+
+> "A service is something that is independently deployable and organized around a business capability." — Sam Newman
+
+That definition matters. If your "micro frontends" can't deploy independently without breaking each other, you don't have micro frontends — you have a distributed monolith with extra steps.
 
 ## What Micro Frontends Actually Solve
 
-Micro frontends solve **organizational problems**, not technical ones. Specifically:
+Micro frontends solve **organizational problems**, not technical ones:
 
-**Independent deployment.** Team A ships their feature without waiting for Team B's release train. At Atlassian, this was the primary driver. When 30 teams share a deploy pipeline, the pipeline becomes the bottleneck. A single flaky test from one team blocks every other team's release.
+| Problem | How Micro Frontends Help |
+|---------|------------------------|
+| **Deployment bottlenecks** | Team A ships without waiting for Team B's release train |
+| **Team autonomy** | Each team owns their slice end-to-end — dependencies, testing, release cadence |
+| **Isolated failures** | If the notifications module crashes, the main app still works |
+| **Incremental migration** | Rewrite one section in a new framework while the rest stays put |
 
-**Team autonomy.** Each team owns their slice of the application end-to-end. They choose their own dependencies, testing strategies, and release cadence. No cross-team coordination for routine changes.
+Notice what's *not* on this list: performance, code quality, developer experience. Micro frontends don't improve any of those. In most cases, they make them worse.
 
-**Isolated failure domains.** If the notifications micro frontend crashes, the main application still works. Compare this to a monolith where a runtime error in one module can take down the entire SPA.
+## The Real Costs Nobody Talks About
 
-**Incremental migration.** You can rewrite one section of the application in a new framework while the rest stays on the old one. This is how many Atlassian products migrated from legacy stacks — one feature at a time.
+Here's the bill that conference talks skip over:
 
-## What Micro Frontends Actually Cost
+| Cost | What It Means in Practice |
+|------|--------------------------|
+| **Shared state complexity** | User updates their profile in settings — how does the header find out? You need cross-module communication: custom events, a shared bus, or broadcast channels. |
+| **UX drift** | Button styles diverge. Loading states differ. Spacing is 4px here, 8px there. Users notice. You need a shared design system with strict governance. |
+| **Bundle bloat** | Three micro frontends each bundling React = users download React three times. Externalizing it creates a version compatibility matrix. |
+| **Performance overhead** | Multiple JS bundles, multiple framework instances, coordination overhead. A well-optimized monolith always outperforms a well-optimized micro frontend setup. |
+| **Tooling investment** | Local dev, testing, CI/CD, preview environments — all get harder. "How do I run the whole app locally?" becomes a non-trivial question. |
+| **Platform team required** | Someone has to build and maintain the shell, shared infrastructure, and developer tooling. Budget 2-3 dedicated engineers. |
 
-And here's the bill:
-
-**Shared state complexity.** When a user updates their profile in the settings micro frontend, how does the header micro frontend (which shows the user's avatar) find out? You need a cross-micro-frontend communication layer — custom events, a shared state bus, or a broadcast channel. Every option adds complexity.
-
-**UX consistency.** Each micro frontend can drift in look and feel. Button styles diverge. Loading states are inconsistent. Spacing differs by 4px here, 8px there. Users notice, even if engineers don't. You need a shared design system with strict governance, which is its own multi-team effort.
-
-**Build complexity.** Shared dependencies need to be externalized or duplicated. If three micro frontends each bundle React, your users download React three times. If you externalize it, you need a shared dependency management strategy and version compatibility testing.
-
-**Performance overhead.** Multiple JavaScript bundles, multiple framework instances, coordination overhead. A well-optimized monolith will always outperform a well-optimized micro frontend architecture. The question is whether the organizational benefits outweigh the performance cost.
-
-**Tooling investment.** Local development, testing, CI/CD, preview environments — all of it gets harder. "How do I run the whole app locally?" becomes a question with a non-trivial answer.
+<Warning>
+The biggest mistake I've seen: teams adopt micro frontends to solve problems that are actually just poor code organization. If your monolith is painful because of bad architecture, micro frontends give you multiple poorly-architected applications instead of one.
+</Warning>
 
 ## The Decision Matrix
 
-I use this matrix whenever someone proposes micro frontends. It's not a formula — it's a structured way to have the conversation.
+Use this when someone proposes micro frontends. It's not a formula — it's a structured way to have an honest conversation.
 
-| Factor | Monolith Wins | Micro Frontend Wins |
-|--------|---------------|---------------------|
-| **Team size** | < 20 engineers on the frontend | > 30 engineers, 5+ teams |
+| Factor | Stay Monolith | Consider Micro Frontends |
+|--------|--------------|--------------------------|
+| **Team size** | < 20 frontend engineers | > 30 engineers, 5+ teams |
 | **Deploy frequency** | Weekly or less | Multiple times daily per team |
-| **Feature coupling** | Features share lots of state and UI | Features are naturally isolated |
+| **Feature coupling** | Features share lots of state and UI | Features are naturally isolated (admin vs user-facing) |
 | **Tech stack** | Single framework, stable | Multiple frameworks or active migration |
-| **UX consistency** | Critical and tightly controlled | Varies by section (admin vs user-facing) |
+| **UX consistency** | Critical and tightly controlled | Varies by section |
 | **Time to market** | Need to ship fast NOW | Willing to invest in platform for speed LATER |
-| **Team distribution** | Co-located, easy to coordinate | Distributed, different timezones |
+| **Team distribution** | Co-located, easy to coordinate | Distributed across timezones |
 | **Codebase age** | < 3 years, well-maintained | 5+ years, legacy sections need replacement |
 
-If you're in the "Monolith Wins" column for most factors, stay with a monolith. Seriously. I cannot stress this enough. Micro frontends for a team of 8 is like buying a semi-truck to commute to work.
+If you're in the "Stay Monolith" column for most factors, stay with a monolith. Seriously. Micro frontends for a team of 8 is like buying a semi-truck to commute to work.
 
-<Warning>
-The biggest mistake I've seen: teams adopt micro frontends to solve problems that are actually just poor code organization. If your monolith is painful because of bad architecture, micro frontends will give you multiple poorly-architected applications instead of one.
-</Warning>
+## Integration Approaches Compared
 
-## Module Federation vs Import Maps vs Iframes
+If you do proceed, you need an integration strategy. Each comes with meaningful trade-offs:
 
-If you do go down the micro frontend path, you need to pick an integration strategy. Here's how they compare based on what I've seen in production:
-
-### Module Federation (Webpack/Rspack)
-
-The most common approach for React-based micro frontends. Each micro frontend exposes modules that others consume at runtime.
-
-```typescript
-// host app - webpack.config.ts
-new ModuleFederationPlugin({
-  name: 'host',
-  remotes: {
-    billing: 'billing@https://billing.app.com/remoteEntry.js',
-    settings: 'settings@https://settings.app.com/remoteEntry.js',
-  },
-  shared: {
-    react: { singleton: true, requiredVersion: '^18.0.0' },
-    'react-dom': { singleton: true, requiredVersion: '^18.0.0' },
-  },
-});
-
-// consuming the remote module
-const BillingDashboard = React.lazy(
-  () => import('billing/BillingDashboard')
-);
-
-function App() {
-  return (
-    <Suspense fallback={<Skeleton />}>
-      <BillingDashboard orgId={currentOrg.id} />
-    </Suspense>
-  );
-}
-```
-
-**Pros:** Shared dependencies (one copy of React), TypeScript support with generated types, granular module-level sharing.
-**Cons:** Webpack/Rspack lock-in, complex configuration, version compatibility matrix between host and remotes.
-
-### Import Maps (Native Browser)
-
-Uses the browser's native module loading with import maps to resolve bare module specifiers to URLs.
-
-```html
-<script type="importmap">
-{
-  "imports": {
-    "@app/billing": "https://billing.app.com/main.js",
-    "@app/settings": "https://settings.app.com/main.js",
-    "react": "https://cdn.app.com/shared/react@18.3.1/index.js"
-  }
-}
-</script>
-```
-
-**Pros:** No build tool lock-in, framework agnostic, simple mental model.
-**Cons:** Limited browser support for dynamic import maps, less granular sharing, no built-in TypeScript type sharing.
-
-### Iframe-Based
-
-Each micro frontend runs in its own iframe. Communication happens via `postMessage`.
-
-**Pros:** Complete isolation (CSS, JS, global state), any framework, any version.
-**Cons:** No shared styles without duplication, `postMessage` is awkward for complex data, SEO challenges, accessibility hurdles (focus management across iframes is painful).
+| Approach | Shared Dependencies | Framework Lock-in | Isolation | Setup Complexity | Best For |
+|----------|-------------------|-------------------|-----------|-----------------|----------|
+| **Module Federation** (Webpack/Rspack) | Shared singletons (one React) | Webpack/Rspack required | Partial | High | React-based, same-framework teams |
+| **Import Maps** (Native Browser) | Manual via CDN | None | Partial | Medium | Framework-agnostic, progressive teams |
+| **Iframes** | None (full duplication) | None | Complete | Low | Legacy integration, third-party embeds |
+| **Web Components** | Manual | None | Good (Shadow DOM) | Medium | Cross-framework, design systems |
 
 <Info>
-At Atlassian, we used a custom solution that was closest to Module Federation — runtime module loading with shared singletons for React, the design system, and the analytics library. The investment in that infrastructure was significant, but it was amortized across hundreds of engineers and dozens of products.
+Module Federation is the most common choice for React teams, but it comes with a version compatibility matrix between host and remotes that you'll be managing forever. Import Maps are simpler conceptually but have less tooling support. Iframes give you complete isolation at the cost of terrible cross-module communication.
 </Info>
 
-## The Atlassian Experience
-
-Here's what I learned from seeing micro frontends at genuine scale:
-
-**The shell application is critical.** The "host" that loads and orchestrates micro frontends is not a trivial piece of code. It handles routing, authentication, shared layout (navigation, sidebar), error boundaries, and loading states. Underinvesting in the shell is the number one failure mode I've seen. Treat it as a product with its own team.
-
-**Shared design system is the glue.** Without a shared design system that every micro frontend consumes, the UX falls apart within months. At Atlassian, the Atlassian Design System was the connective tissue. Every team consumed the same components, tokens, and patterns. This didn't happen by accident — it required a dedicated platform team and governance.
-
-**Contract testing prevents integration hell.** When Team A's micro frontend consumes Team B's exposed module, you need contract tests that verify the interface hasn't broken. Without them, one team's deploy breaks another team's feature, and you're back to the coordination problems you were trying to escape.
-
-**Performance budgets per micro frontend.** If you don't set per-module bundle size budgets, teams will bloat independently and the combined payload becomes unmanageable. We had CI checks that blocked merges if a micro frontend exceeded its budget.
-
-## When to Choose Monolith-First
+## The Monolith-First Approach
 
 My default recommendation: **start with a monolith and extract micro frontends only when organizational pain demands it.**
 
-A well-structured monolith with feature-based folder structure, lazy-loaded routes, and a shared component library will carry you further than you think. Probably to 20-30 engineers, sometimes further if the team is disciplined.
+A well-structured monolith with feature-based folders, lazy-loaded routes, and a shared component library will carry you further than you think. Probably to 20-30 engineers, sometimes further if the team is disciplined.
+
+The key is structuring your monolith with clean feature boundaries from day one:
 
 ```
 src/
   features/
-    billing/          # Could become a micro frontend later
+    billing/       ← could become a micro frontend later
       components/
       hooks/
       api/
-      routes.tsx
-    settings/         # Could become a micro frontend later
+    settings/      ← could become a micro frontend later
       components/
       hooks/
       api/
-      routes.tsx
   shared/
-    components/       # Shared design system
+    components/    ← shared design system
     hooks/
     utils/
-  app/
-    layout.tsx
-    routes.tsx
 ```
 
-If you structure your monolith with clear feature boundaries from day one, extracting a feature into a micro frontend later is straightforward. The reverse — merging micro frontends into a monolith because the overhead wasn't worth it — is much harder.
+If you structure it this way, extracting a feature into a micro frontend later is straightforward. The reverse — merging micro frontends back into a monolith because the overhead wasn't worth it — is much harder.
 
 <Tip>
 The best micro frontend architecture is the one you don't build until you need it. Structure your monolith as if each feature folder could become independent. When the organizational pain arrives, you'll have clean seams to cut along.
 </Tip>
 
-## The Questions I Ask Before Saying Yes
+## Questions to Ask Before Saying Yes
 
-When an engineering leader proposes micro frontends, I ask these questions:
+When someone proposes micro frontends, run through this checklist:
 
-1. **What specific problem are you solving?** "Modernization" isn't specific enough. "Team A can't deploy without coordinating with Team B, and it's costing us 2 days per release" is.
-2. **Have you tried solving it within the monolith first?** Code ownership rules, deploy pipelines per directory, feature flags — these solve many of the same problems without the architecture change.
-3. **Who will build and maintain the platform?** Micro frontends need a platform team. If you're not willing to dedicate 2-3 engineers to the shell, shared infrastructure, and developer tooling, the micro frontends will rot.
-4. **What's your performance budget?** If you can't tolerate a 20-30% increase in JavaScript payload (the realistic overhead), micro frontends might not be appropriate for your product.
-5. **What's the migration plan?** Nobody goes from monolith to micro frontends in one sprint. The plan should be 6-12 months with clear milestones and the ability to stop if it's not working.
+1. **What specific problem are you solving?** "Modernization" isn't specific. "Team A can't deploy without coordinating with Team B, costing us 2 days per release" is.
+2. **Have you tried solving it within the monolith?** Code ownership rules, per-directory deploy pipelines, feature flags — these solve many of the same problems without the architecture change.
+3. **Who will maintain the platform?** If you can't dedicate 2-3 engineers to the shell, shared infrastructure, and tooling, the micro frontends will rot.
+4. **What's your performance budget?** If you can't tolerate a 20-30% increase in JavaScript payload, this might not be right for your product.
+5. **What's the migration plan?** Nobody goes monolith to micro frontends in one sprint. Plan 6-12 months with clear milestones and the ability to stop if it's not working.
 
-Micro frontends are a powerful pattern — at the right scale, for the right problems. The sin isn't adopting them. The sin is adopting them because they sound good on a conference talk without honestly assessing whether your team is the audience that talk was written for.
+Micro frontends are a powerful pattern — at the right scale, for the right problems. The sin isn't adopting them. The sin is adopting them because they sounded good in a conference talk without honestly assessing whether your team is the audience that talk was written for.

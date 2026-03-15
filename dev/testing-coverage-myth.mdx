@@ -3,139 +3,95 @@ title: "Why I Stopped Chasing 100% Test Coverage (And What I Measure Instead)"
 description: "The testing trophy, confidence-driven testing, and the metrics that actually predict code quality."
 ---
 
+![A laptop screen showing lines of code in a dark editor](https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=800&auto=format&fit=crop&q=80)
 
-I once spent two weeks getting a React codebase to 100% test coverage. Every line, every branch, every function — covered. Green badges everywhere. The team celebrated. Then we shipped a regression that broke the entire checkout flow. 100% coverage. Zero confidence.
+You just spent two weeks pushing your codebase to 100% test coverage. Every line, every branch, every function — green. The badge is shining on your README. Then you deploy and a regression breaks the most important user flow in your application. Everything was "covered." Nothing was actually tested.
 
-That was the moment I realized coverage is a vanity metric. It measures how much code your tests touch, not how much behaviour your tests verify. You can have 100% coverage and miss every meaningful bug. You can have 60% coverage and catch every bug that matters.
+If that story sounds familiar, you've discovered the dirty secret of software metrics: **coverage measures how much code your tests touch, not how much behaviour they verify.** You can reach 100% by rendering a component with zero assertions. You can hit every branch with snapshot tests that nobody reads. The number goes up. Confidence doesn't.
 
-Here's how I think about testing now.
+> _"Write tests. Not too many. Mostly integration."_ — Guillermo Rauch
 
 ## The 100% Coverage Trap
 
-The chase for full coverage creates three problems:
+Chasing full coverage creates three predictable problems, and understanding them is the first step toward a healthier testing strategy.
 
-**1. False confidence.** 100% line coverage means every line executed during tests. It doesn't mean every line was tested meaningfully. A snapshot test covers every line of a component without testing any behaviour. A test that calls a function but doesn't assert on the result covers the function without verifying it works.
-
-```typescript
-// "Covered" but tests nothing meaningful
-test('renders PaymentForm', () => {
-  render(<PaymentForm />);
-  // No assertions! But coverage says every line of PaymentForm is "covered"
-});
-```
-
-**2. Slow test suites.** Chasing 100% means testing internals — private functions, implementation details, edge cases that never occur in production. These tests add minutes to CI without adding confidence. At Atlassian, one team's test suite took 18 minutes. We audited it and found 40% of tests were testing implementation details. Removing them cut the suite to 11 minutes with identical bug detection.
-
-**3. Brittle tests.** When you test implementation details, every refactor breaks tests. Engineers stop refactoring because "it breaks the tests." The tests become a liability instead of a safety net. The codebase calcifies because the tests punish change.
+| Problem | What Happens | Why It Hurts |
+|---------|-------------|-------------|
+| **False confidence** | Tests execute every line but assert on nothing meaningful. Snapshot tests and no-assertion renders inflate the number. | You trust a metric that doesn't reflect reality. Bugs ship under a green dashboard. |
+| **Slow test suites** | Covering every private function and internal edge case adds hundreds of tests that don't catch real bugs. | CI takes 15+ minutes. Engineers stop running tests locally and "push and pray." |
+| **Brittle tests** | Tests coupled to implementation details break on every refactor — even when behaviour is unchanged. | Engineers stop refactoring. The codebase calcifies. Tests become a liability, not a safety net. |
 
 <Warning>
-If your test suite breaks during a refactor that doesn't change behaviour, your tests are testing implementation, not behaviour. Delete them and rewrite tests that verify what users see and what APIs return.
+If your test suite breaks during a refactor that doesn't change any external behaviour, your tests are testing implementation details, not user-facing outcomes. Those tests are working against you.
 </Warning>
 
 ## The Testing Trophy
 
-Kent C. Dodds' testing trophy replaced the testing pyramid for me, and I think it's the right mental model for modern full-stack TypeScript applications:
+Kent C. Dodds' testing trophy replaced the classic testing pyramid for modern full-stack applications. Think of it as a guide for where to invest your testing time.
 
-| Layer | Volume | Speed | Confidence | What It Tests |
-|-------|--------|-------|------------|---------------|
-| Static Analysis | Most | Fastest | Low-Medium | TypeScript types, ESLint, Prettier |
-| Unit Tests | Some | Fast | Low-Medium | Pure functions, utilities, algorithms |
-| Integration Tests | Most Tests | Medium | **High** | Components + hooks + API + DB together |
-| E2E Tests | Few | Slow | **Highest** | Critical user journeys end-to-end |
+| Layer | Volume | Speed | Confidence | What It Catches |
+|-------|--------|-------|------------|-----------------|
+| **Static Analysis** | Runs on every keystroke | Instant | Low–Medium | Type errors, lint violations, formatting |
+| **Unit Tests** | Some | Fast | Low–Medium | Pure function logic, utility edge cases |
+| **Integration Tests** | Most test code | Medium | **High** | Components + hooks + API + DB working together |
+| **E2E Tests** | Few | Slow | **Highest** | Full user journeys across the real stack |
 
-The key insight: **integration tests give the best confidence-to-cost ratio.** They test real behaviour — components rendering with real hooks calling real APIs returning real data — without the overhead of a full browser.
+The key insight is that **integration tests give the best confidence-to-cost ratio.** They test real behaviour — a component rendering with real hooks, calling a real API, returning real data — without the overhead of spinning up an entire browser. Static analysis is essentially free once configured, so invest there heavily. Unit tests shine for pure logic. And E2E tests are reserved for the journeys where a failure would cost real money or real trust.
 
-Static analysis is the foundation. TypeScript catches an enormous category of bugs at zero runtime cost. ESLint catches patterns. Prettier eliminates formatting debates. This layer is "free" — invest heavily.
+## What to Test vs What to Skip
 
-Unit tests have their place for pure logic: utility functions, data transformations, algorithm-heavy code. But for most application code — React components, API handlers, database queries — unit tests test implementation, not behaviour.
+One of the hardest skills to develop is knowing when *not* to write a test. Here's a decision framework.
+
+| Test This | Skip This |
+|-----------|-----------|
+| Critical user journeys (signup, checkout, payments) | Third-party library internals — they have their own tests |
+| API endpoint responses and status codes | TypeScript types at runtime — the compiler already enforces them |
+| Component behaviour from the user's perspective | Implementation details like which internal function was called |
+| Complex business logic with many edge cases | Trivial getters like `const getName = (u) => u.name` |
+| Error handling paths (what breaks when a dependency fails?) | One-off migration scripts — manual verification is fine |
+
+<Tip>
+A useful litmus test: if you refactored the internals of a module without changing its inputs or outputs, would your test break? If yes, you're testing implementation. Rewrite it to assert on behaviour — inputs in, outputs out, side effects verified.
+</Tip>
 
 ## Confidence-Driven Testing
 
-Instead of asking "what's our coverage percentage?", I ask: **"how confident am I that this deploy won't break anything users care about?"**
+Instead of asking "what's our coverage percentage?", ask a better question: **"How confident am I that this deploy won't break anything users care about?"**
 
-This reframes testing entirely. You start from the user's perspective:
+This reframes your entire approach. You start from the user's perspective and work backward:
 
-1. What are the critical user journeys? (Sign up, make a payment, generate a report)
-2. What would break them? (Auth fails, payment processing errors, data corruption)
-3. What tests would catch those breaks?
+1. **Identify critical user journeys.** What are the 5–10 flows that generate the most business value? Signup, purchase, core feature usage.
+2. **Map what could break them.** Auth failures, payment processing errors, data corruption, third-party API outages.
+3. **Write tests that catch those breaks.** Not tests that cover lines — tests that simulate real scenarios and assert on real outcomes.
 
-```typescript
-// Confidence-driven: tests what users experience
-test('user can complete a payment', async () => {
-  const user = await createTestUser({ plan: 'business' });
-  const response = await request(app)
-    .post('/api/payments')
-    .set('Authorization', `Bearer ${user.token}`)
-    .send({
-      amount: 15000,
-      currency: 'AUD',
-      recipientId: recipient.id,
-    });
+A single integration test that sends a real HTTP request, hits a real database, and verifies the response tells you more about production readiness than fifty unit tests full of mocks.
 
-  expect(response.status).toBe(200);
-  expect(response.body.payment.status).toBe('processing');
+## Metrics That Actually Matter
 
-  const payment = await db.payment.findUnique({
-    where: { id: response.body.payment.id },
-  });
-  expect(payment?.amount).toBe(15000);
-});
-```
+I've replaced the coverage percentage with four metrics that genuinely predict reliability.
 
-Compare this to the typical unit test approach: mock the payment service, mock the database, mock the auth middleware, test the handler in isolation. You've tested that the handler calls the right mocks with the right arguments. You haven't tested that a payment actually works.
+| Metric | What It Measures | Target | How to Track |
+|--------|-----------------|--------|--------------|
+| **Bug escape rate** | Bugs reaching production per deploy | < 1 per 100 deploys | Error tracking + deploy log |
+| **Time to detect** | How fast you learn about escaped bugs | < 5 min for critical | Alerting tool MTTR |
+| **Deploy confidence** | Team's gut trust in the test suite | > 4.0 / 5.0 | Weekly 1-question survey |
+| **Suite speed** | Whether engineers actually run tests | < 5 min locally | CI metrics dashboard |
 
-## What I Don't Test
-
-Knowing what NOT to test is as important as knowing what to test:
-
-- **Third-party library behaviour.** Don't test that `zod` validates correctly. They have their own tests.
-- **TypeScript types at runtime.** If a function expects `string` and TypeScript enforces it, don't write a test passing a number.
-- **Implementation details.** Don't test which internal function a component calls. Test what the component renders and how it responds to user interaction.
-- **One-off scripts.** Migration scripts, seed scripts, one-time data fixes — manual verification is fine.
-- **Trivial getters/setters.** If a function is `const getName = (user) => user.name`, testing it is pure coverage theatre.
-
-<Tip>
-A useful litmus test: if you refactored the internals of a function without changing its inputs or outputs, would your test break? If yes, you're testing implementation. Rewrite it to test behaviour — inputs in, outputs out, side effects verified.
-</Tip>
-
-## The Metrics That Actually Matter
-
-I've replaced coverage percentage with four metrics that actually predict whether our code is reliable:
-
-### 1. Bug escape rate
-
-How many bugs reach production per deploy? This is the ultimate measure of test effectiveness. Track it weekly. At Weel, our target is less than 1 customer-reported bug per 100 deploys.
-
-### 2. Time to detect (TTD)
-
-When a bug does escape, how long before we know? This combines test coverage with monitoring and alerting. Our target: under 5 minutes for SEV1, under 1 hour for SEV2.
-
-### 3. Deploy confidence score
-
-Before each deploy, I ask the team: "on a scale of 1-5, how confident are you this deploy is safe?" We track the average over time. Consistently low scores mean the test suite isn't providing confidence — regardless of what the coverage number says.
-
-### 4. Test suite speed
-
-A test suite that takes 20 minutes doesn't get run locally. Engineers push and pray. Our target: full suite under 5 minutes locally, under 8 minutes in CI. If a test is slow, it either gets optimised or deleted.
-
-| Metric | What It Measures | Our Target | How We Track |
-|--------|-----------------|------------|--------------|
-| Bug escape rate | Test effectiveness | < 1 per 100 deploys | Sentry + deploy log |
-| Time to detect | Monitoring + tests | < 5 min (SEV1) | PagerDuty MTTR |
-| Deploy confidence | Team trust in tests | > 4.0 / 5.0 | Weekly survey |
-| Suite speed | Developer experience | < 5 min local | CI metrics |
+Bug escape rate is your north star — it directly measures whether your tests are catching what matters. Time to detect combines your tests with monitoring to give a full safety picture. Deploy confidence is qualitative but powerful: if the team doesn't trust the suite, the number on the dashboard is irrelevant. And suite speed is the silent killer — a 20-minute suite is a suite nobody runs locally.
 
 ## Practical Test Budgeting
 
-Here's how I allocate testing effort on a typical feature at Weel:
+Here's how I allocate testing effort on a typical feature:
 
-- **50% integration tests.** API endpoint tests with real database, component tests with real hooks and mocked network.
-- **20% E2E tests.** 2-3 Playwright tests covering the happy path and the most critical error path.
-- **20% static analysis.** TypeScript strict mode, ESLint rules, Zod schemas for runtime validation.
-- **10% unit tests.** Only for pure utility functions and complex business logic calculations.
+| Category | Time Budget | Why |
+|----------|------------|-----|
+| Integration tests | 50% | API endpoints with real databases, components with real hooks. Highest confidence per hour invested. |
+| E2E tests | 20% | 2–3 Playwright tests covering the happy path and the most critical error path. |
+| Static analysis | 20% | TypeScript strict mode, ESLint rules, Zod schemas for runtime validation at boundaries. |
+| Unit tests | 10% | Only for pure utility functions and genuinely complex business logic calculations. |
 
 <Info>
-This ratio is intentionally inverted from what most testing guides recommend. Conventional wisdom says lots of unit tests, few integration tests. I've found the opposite produces more confidence per hour of engineering time invested. Write the integration test first. Add unit tests only when the logic is genuinely complex enough to warrant isolating it.
+This ratio is intentionally inverted from most testing guides. Conventional wisdom says lots of unit tests, few integration tests. In my experience, the opposite produces more confidence per hour of engineering time. Write the integration test first. Add unit tests only when the logic is complex enough to warrant isolating it.
 </Info>
 
-The goal of testing isn't a green badge. It's the confidence to deploy on a Friday afternoon without checking Slack every 5 minutes. Measure confidence, not coverage, and your testing strategy will follow naturally.
+The goal of testing isn't a green badge. It's the confidence to deploy on a Friday afternoon without anxiously checking your error tracker every five minutes. Measure confidence, not coverage, and the right testing strategy follows naturally.

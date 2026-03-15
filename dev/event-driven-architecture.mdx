@@ -3,281 +3,113 @@ title: "Event-Driven Architecture for TypeScript Teams: Queues, Pub/Sub, and the
 description: "CQRS, event sourcing, message queues — the event-driven patterns that worked in production and the ones that created more problems than they solved."
 ---
 
-
 Event-driven architecture is one of those topics where the conference talks make it sound inevitable and the production experience makes you question your life choices. I've built event-driven systems that beautifully decoupled complex domains, and I've built ones that turned simple operations into untraceable chains of events that nobody could debug.
 
-The difference wasn't the technology. It was knowing when the pattern fit the problem and — critically — when it didn't.
+The difference wasn't the technology. It was knowing when the pattern fit the problem — and critically — when it didn't. Here's what you need to know before you put events at the center of your system.
 
-## When Event-Driven Makes Sense vs Request-Response
+![Team collaborating at a whiteboard](https://images.unsplash.com/photo-1531482615713-2afd69097998?w=800&auto=format&fit=crop&q=80)
 
-Here's the mental model I use. If the caller **needs the result** before it can proceed, use request-response. If the caller **doesn't care about the outcome** or the work can happen **later**, use events.
+> "Data on the outside is immutable. The only thing you can do with data on the outside is interpret it." — Pat Helland
 
-```typescript
-// Request-response: caller needs the result
-const balance = await accountService.getBalance(accountId);
-if (balance < amount) throw new InsufficientFundsError();
+Pat's insight underpins all event-driven thinking: events are facts about things that happened. They're immutable. Subscribers interpret them however they need to. That's the power — and the complexity.
 
-// Event-driven: caller doesn't need the result
-await eventBus.emit('expense.approved', {
-  expenseId: expense.id,
-  approvedBy: user.id,
-  amount: expense.amount,
-});
-// The API returns here. Downstream effects happen asynchronously:
-// - Accounting system records the expense
-// - Reimbursement is queued
-// - Manager gets a Slack notification
-// - Analytics are updated
-```
+## When to Use Events vs. Request-Response
+
+This is the most important decision in event-driven architecture, and teams get it wrong constantly. Here's the mental model:
+
+| Signal | Use Request-Response | Use Events |
+|--------|---------------------|------------|
+| Caller **needs the result** to proceed | ✅ Get a balance before authorizing a payment | |
+| Caller **doesn't care** about the outcome | | ✅ Send a notification after an approval |
+| Work must happen **before the response** | ✅ Validate permissions, check constraints | |
+| Work can happen **later** | | ✅ Update analytics, sync to a third-party system |
+| Failure must be **immediately visible** | ✅ Show "insufficient funds" to the user | |
+| Failure can be **retried in background** | | ✅ Retry sending an email, retry syncing a record |
+| One consumer | ✅ Simple function call | |
+| Multiple consumers with different concerns | | ✅ Approval triggers accounting, reimbursement, notifications, audit |
 
 The rule: **synchronous for reads and validations, asynchronous for side effects and notifications.**
 
-At Weel, expense approval is a good example. When a manager approves an expense, the API needs to validate their permission and record the approval — that's synchronous. But triggering the reimbursement, notifying the employee, updating the accounting ledger, and logging the audit trail? None of that needs to happen before the API responds. Events let us decouple those concerns so that adding a new side effect (say, posting to an ERP system) doesn't require modifying the approval endpoint.
+The power of events shows up when a single action triggers multiple downstream effects. An expense approval, for example, might need to update the accounting ledger, queue a reimbursement, notify the employee, and log an audit trail. Without events, the approval endpoint directly calls four different services and becomes a fragile coordination point. With events, it publishes one `expense.approved` event, and each downstream system subscribes independently.
 
-## Message Brokers Compared
+<Tip>
+If adding a new side effect requires modifying the original endpoint, you need events. If the side effect is a core part of the operation (not optional, not independent), keep it synchronous. The test is: "Would the operation be considered complete without this step?"
+</Tip>
 
-Choosing a message broker is a consequential decision. Here's my honest comparison based on running each in production:
+## Message Broker Comparison
+
+Choosing a broker is a consequential decision. Here's an honest comparison from production experience:
 
 | Feature | Redis Pub/Sub | BullMQ (Redis) | Amazon SQS | Apache Kafka |
 |---------|--------------|----------------|------------|--------------|
 | **Delivery guarantee** | At-most-once (fire & forget) | At-least-once (with retries) | At-least-once | At-least-once / exactly-once |
 | **Persistence** | None — miss it, lose it | Redis-backed job storage | 14-day retention | Configurable (days to forever) |
 | **Ordering** | Per-channel | Per-queue (FIFO) | FIFO queues available | Per-partition |
-| **Throughput** | Very high | High | High | Very high |
 | **Complexity** | Low | Medium | Medium | High |
-| **Cost** | Redis instance | Redis instance | Per-request pricing | Cluster management |
 | **Dead letter queue** | DIY | Built-in | Built-in | DIY or Kafka Streams |
-| **Best for** | Real-time notifications, cache invalidation | Background jobs, retries, scheduled work | Serverless, AWS-native stacks | Event streaming, log aggregation, replay |
+| **Best for** | Real-time notifications, cache invalidation | Background jobs, retries, scheduled work | Serverless / AWS-native stacks | Event streaming, log aggregation, replay |
+
+**My default stack:** BullMQ for background jobs and task queues, SQS for cross-service communication, Redis Pub/Sub only for real-time UI updates where message loss is acceptable (typing indicators, presence).
 
 <Warning>
-Redis Pub/Sub has no persistence. If a subscriber is offline when a message is published, that message is gone. I've seen teams use Redis Pub/Sub for critical business events and lose data during deployments. Use BullMQ (which stores jobs in Redis) or SQS for anything that can't be lost.
+Redis Pub/Sub has no persistence. If a subscriber is offline when a message is published, that message is gone forever. I've seen teams use Redis Pub/Sub for critical business events and lose data during routine deployments. Use BullMQ or SQS for anything that can't be lost.
 </Warning>
 
-My default stack: **BullMQ for background jobs and task queues, SQS for cross-service communication, Redis Pub/Sub only for real-time UI updates where loss is acceptable** (like "someone is typing" indicators).
+## CQRS: Simpler Than It Sounds
 
-## CQRS: Command Query Responsibility Segregation
+Command Query Responsibility Segregation sounds academic, but the core idea is practical: **separate the models for reading data and writing data.**
 
-CQRS means separating the models for reading data and writing data. It sounds academic until you hit a codebase where the `getOrder` endpoint returns a shape that's completely different from what the `createOrder` endpoint accepts, and both are fighting over the same ORM model.
+Think of it like a restaurant. The kitchen (write side) has a workflow optimized for preparing food — recipes, ingredient lists, timing. The menu (read side) is optimized for answering questions — what's available, what does it cost, what's popular. They're both about the same food, but they're structured completely differently because they serve different purposes.
 
-Here's the TypeScript implementation pattern I use:
+| Aspect | Write Model (Commands) | Read Model (Queries) |
+|--------|----------------------|---------------------|
+| **Optimized for** | Enforcing business rules, maintaining consistency | Answering questions quickly |
+| **Shape** | Normalized, domain-driven | Denormalized, UI-driven |
+| **Validation** | Heavy — permissions, constraints, invariants | Light — just fetch and return |
+| **Storage** | Primary database, transactional | Can be a separate DB, materialized view, or cache |
+| **Example** | `ApproveExpense(expenseId, approverId)` | `GetExpenseSummaryByMonth(orgId, month)` |
 
-```typescript
-// Commands — write operations
-interface CreateExpenseCommand {
-  type: 'CreateExpense';
-  payload: {
-    userId: string;
-    amount: Money;
-    category: ExpenseCategory;
-    receiptUrl: string;
-    description: string;
-  };
-}
+You don't need to go full CQRS with separate databases to benefit from the principle. Even separating your DTOs into `CreateExpenseDto` (command) and `ExpenseResponseDto` (query) is a form of CQRS — and often all you need.
 
-interface ApproveExpenseCommand {
-  type: 'ApproveExpense';
-  payload: {
-    expenseId: string;
-    approverId: string;
-    note?: string;
-  };
-}
+## Eventual Consistency: The Trade-Off You Must Explain
 
-type ExpenseCommand = CreateExpenseCommand | ApproveExpenseCommand;
+Event-driven systems are eventually consistent. When a manager approves an expense, the approval is recorded immediately, but the reimbursement, the accounting entry, and the analytics update happen asynchronously. For a brief window, different parts of the system disagree about the world's state.
 
-// Command handler
-class ExpenseCommandHandler {
-  constructor(
-    private readonly repo: ExpenseRepository,
-    private readonly eventBus: EventBus,
-  ) {}
+This is fine — **as long as everyone knows it.** The problem isn't eventual consistency itself. It's when the team builds a UI that assumes immediate consistency.
 
-  async handle(command: ExpenseCommand): Promise<void> {
-    switch (command.type) {
-      case 'CreateExpense': {
-        const expense = Expense.create(command.payload);
-        await this.repo.save(expense);
-        await this.eventBus.emit('expense.created', {
-          expenseId: expense.id,
-          ...command.payload,
-        });
-        break;
-      }
-      case 'ApproveExpense': {
-        const expense = await this.repo.findByIdOrThrow(command.payload.expenseId);
-        expense.approve(command.payload.approverId, command.payload.note);
-        await this.repo.save(expense);
-        await this.eventBus.emit('expense.approved', {
-          expenseId: expense.id,
-          approverId: command.payload.approverId,
-        });
-        break;
-      }
-    }
-  }
-}
+| Action Type | Consistency Strategy | Why |
+|------------|---------------------|-----|
+| **Low-stakes** (mark notification read) | Optimistic update — change UI immediately | Users expect instant response; if it fails, retry silently |
+| **Medium-stakes** (update a profile) | Optimistic + background sync | Show the change immediately, confirm async |
+| **High-stakes** (financial transaction) | Show "processing" state, poll or push for confirmation | Users expect payments to take a moment; accuracy matters more than speed |
 
-// Queries — read operations (completely separate model)
-interface ExpenseSummaryQuery {
-  organizationId: string;
-  month: string;
-  status?: ExpenseStatus;
-}
-
-class ExpenseQueryService {
-  constructor(private readonly db: PrismaService) {}
-
-  async getSummary(query: ExpenseSummaryQuery): Promise<ExpenseSummary> {
-    // This can use a denormalized read model, materialized view,
-    // or even a separate database optimized for reads
-    return this.db.$queryRaw`
-      SELECT
-        status,
-        COUNT(*) as count,
-        SUM(amount_cents) as total_cents
-      FROM expenses
-      WHERE organization_id = ${query.organizationId}
-        AND DATE_TRUNC('month', created_at) = ${query.month}::date
-        ${query.status ? Prisma.sql`AND status = ${query.status}` : Prisma.empty}
-      GROUP BY status
-    `;
-  }
-}
-```
-
-The key insight: **the write model is optimized for enforcing business rules. The read model is optimized for answering questions.** They don't have to use the same database, the same schema, or even the same data shape.
-
-<Info>
-You don't need to go full CQRS to benefit from the principle. Even separating your DTOs into `CreateExpenseDto` (command) and `ExpenseResponseDto` (query) is a form of CQRS. Start there. Only introduce separate read/write datastores when your read and write patterns genuinely have different performance characteristics.
-</Info>
-
-## Event Sourcing: When It's Worth It (Rarely)
-
-Event sourcing stores every state change as an immutable event. Instead of updating a row, you append an event. The current state is derived by replaying all events.
-
-I'm going to be direct: **for most applications, event sourcing creates more problems than it solves.** The replay mechanism is complex. Querying current state requires projections. Schema evolution of events is tricky. Debugging requires reconstructing state at a point in time.
-
-Where it's genuinely worth it:
-
-- **Financial audit trails.** When regulators require a complete, immutable history of every change to a transaction. At Weel, we use event sourcing for the transaction ledger because we need to answer "what happened to this payment and when?" with absolute certainty.
-- **Collaborative editing.** Google Docs-style systems where multiple users modify the same document. Events (operations) are the natural model.
-- **Complex domain logic with undo.** Workflows where business operations need to be reversed or compensated.
-
-For everything else, a regular database with an audit log table is simpler and just as effective:
-
-```typescript
-// Pragmatic alternative to event sourcing: audit log
-async function approveExpense(expenseId: string, approverId: string) {
-  await prisma.$transaction([
-    prisma.expense.update({
-      where: { id: expenseId },
-      data: { status: 'APPROVED', approvedBy: approverId, approvedAt: new Date() },
-    }),
-    prisma.auditLog.create({
-      data: {
-        entityType: 'EXPENSE',
-        entityId: expenseId,
-        action: 'APPROVED',
-        userId: approverId,
-        previousState: { status: 'PENDING' },
-        newState: { status: 'APPROVED' },
-      },
-    }),
-  ]);
-}
-```
-
-You get the history. You get the audit trail. You don't get the complexity of event replay, projections, and eventual consistency.
-
-## Dead Letter Queues: Your Safety Net
-
-Every message queue needs a dead letter queue (DLQ). When a message fails processing after all retries, it goes to the DLQ instead of being lost.
-
-```typescript
-// BullMQ with dead letter handling
-const worker = new Worker('payments', async (job) => {
-  const result = await processPayment(job.data);
-  if (!result.success) {
-    throw new Error(`Payment failed: ${result.reason}`);
-  }
-}, {
-  connection: redis,
-  concurrency: 10,
-});
-
-worker.on('failed', async (job, error) => {
-  if (job && job.attemptsMade >= job.opts.attempts!) {
-    // Job exhausted all retries — move to DLQ for manual investigation
-    await deadLetterQueue.add('failed-payment', {
-      originalJob: job.data,
-      error: error.message,
-      failedAt: new Date().toISOString(),
-      attempts: job.attemptsMade,
-    });
-
-    await alertOpsTeam({
-      message: `Payment job ${job.id} moved to DLQ after ${job.attemptsMade} attempts`,
-      severity: 'high',
-    });
-  }
-});
-```
-
-<Tip>
-Set up a dashboard for your DLQ. Review it daily. A growing DLQ is an early warning signal — either your downstream dependency is degraded, your data has an edge case you didn't handle, or your retry strategy needs adjustment. Treat DLQ items like production incidents.
-</Tip>
+The rule: **optimistic updates for low-stakes actions, explicit processing states for high-stakes actions.** Users expect a payment to take a moment. They don't expect marking a notification as read to take a moment.
 
 ## Idempotency: The Non-Negotiable
 
-In event-driven systems, messages can be delivered more than once. Network hiccups, consumer restarts, retry logic — all of these can cause duplicate processing. Every consumer must be idempotent: processing the same message twice should produce the same result as processing it once.
+In event-driven systems, messages can arrive more than once. Network hiccups, consumer restarts, retry logic — all cause duplicate delivery. Every consumer must be idempotent: processing the same message twice produces the same result as processing it once.
 
 ```typescript
-async function processExpenseReimbursement(event: ExpenseApprovedEvent) {
-  // Idempotency key — check if we've already processed this event
-  const existing = await prisma.reimbursement.findUnique({
+async function handleExpenseApproved(event: ExpenseApprovedEvent) {
+  const existing = await db.reimbursement.findUnique({
     where: { expenseId: event.expenseId },
   });
+  if (existing) return; // Already processed — skip
 
-  if (existing) {
-    logger.info(`Reimbursement already exists for expense ${event.expenseId}, skipping`);
-    return;
-  }
-
-  await prisma.reimbursement.create({
+  await db.reimbursement.create({
     data: {
       expenseId: event.expenseId,
       amount: event.amount,
-      status: 'PENDING',
       idempotencyKey: `reimburse-${event.expenseId}`,
     },
   });
 }
 ```
 
-The pattern: **check before you act, use a unique constraint as the last line of defense.** The database's unique index catches the race condition that the application-level check might miss.
+The pattern: **check before you act, use a unique constraint as the last line of defense.** The database unique index catches the race condition that the application-level check might miss.
 
-## Eventual Consistency: The Trade-off You Must Explain
-
-Event-driven systems are eventually consistent. When a manager approves an expense, the approval is recorded immediately, but the reimbursement, the accounting entry, and the analytics update happen asynchronously. For a brief window, different parts of the system disagree about the state of the world.
-
-This is fine — as long as everyone knows it. The problem isn't eventual consistency itself. The problem is when the team builds a UI that assumes immediate consistency, and users see stale data.
-
-```typescript
-// After approving an expense, the UI can:
-// Option A: Show optimistic state (immediate but potentially wrong)
-// Option B: Show a "processing" state and poll for completion
-// Option C: Use WebSocket/SSE to push the final state
-
-// I prefer Option B for financial operations:
-async function handleApprove(expenseId: string) {
-  await api.approveExpense(expenseId);
-  // Don't immediately refetch — the read model may not be updated yet
-  setStatus('processing');
-  // Poll or listen for the final state
-  pollUntilSettled(expenseId);
-}
-```
-
-The rule I follow: **optimistic updates for low-stakes actions (marking a notification as read), polling or push for high-stakes actions (financial transactions).** Users expect a payment to take a moment. They don't expect marking a notification as read to take a moment.
-
+<Info>
 Event-driven architecture isn't inherently better or worse than request-response. It's a tool that trades simplicity for decoupling. Use it where the decoupling has clear value — cross-team boundaries, unreliable downstream systems, work that doesn't need to happen synchronously. Keep it out of places where a simple function call would do.
+</Info>
+
+Event-driven systems reward disciplined thinking about data flow, failure modes, and consistency trade-offs. Start small — a single background job queue for slow operations. Graduate to pub/sub when you have genuine multi-consumer needs. Reach for event sourcing only when an immutable audit trail is a regulatory requirement. The best event-driven architectures aren't the most sophisticated — they're the ones where every event earns its place.

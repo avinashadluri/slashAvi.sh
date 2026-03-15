@@ -3,89 +3,86 @@ title: "What I Actually Do as a Staff Engineer (Spoiler: It's Not Just Code)"
 description: "The real day-to-day of a staff engineer — technical strategy, influence without authority, org-level impact, and why coding is maybe 30% of the job."
 ---
 
-Every few months someone asks me what I actually do all day. The question usually comes from a senior engineer who's been heads-down shipping features, looks up, and wonders what happens after senior. The honest answer is: it depends on the week, and it's rarely what you'd expect.
+![Team planning session around a table](https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&auto=format&fit=crop&q=80)
 
-When I made the jump to staff, I thought I'd be writing the hardest code, designing the most complex systems, and generally being the best engineer in the room. I was wrong about all three. The role is less about being the best individual contributor and more about making everyone around you better. It's a force multiplier job, and that shift is genuinely disorienting the first time you experience it.
+Every few months, a senior engineer asks me what I actually do all day. They've been heads-down shipping features, they look up, and they wonder what comes after senior. The honest answer catches them off guard: most of my week has nothing to do with writing code.
+
+When I first stepped into the staff role, I expected to write the hardest code and design the most complex systems. I was wrong about all of it. The role is less about being the best individual contributor and more about making everyone around you better. That shift is genuinely disorienting the first time you experience it.
+
+> "A Staff Engineer is not just a Senior who has been around longer. The role is a discrete step that requires a different set of skills, behaviours, and perspective." — Will Larson, *Staff Engineer*
 
 ## The Typical Week
 
-Here's what a real week looks like for me. Not the idealized version — the actual one.
+Here is what a real week looks like — not the idealized version, the actual one.
 
 | Day | Morning | Afternoon |
 |-----|---------|-----------|
 | Monday | Technical strategy review, update architecture roadmap | RFC review for two teams, async feedback on design docs |
 | Tuesday | Deep coding block (migration tooling) | 1:1s with two engineers I mentor, team sync |
-| Wednesday | Cross-team alignment meeting (API contracts) | Prototype for proposed caching approach |
-| Thursday | Write strategy doc for Q3 platform direction | Code reviews (6-8 PRs), incident review |
+| Wednesday | Cross-team alignment meeting (API contracts) | Prototype for a proposed caching approach |
+| Thursday | Write strategy doc for next quarter's platform direction | Code reviews (6-8 PRs), incident review |
 | Friday | Open source contributions, learning block | Ad-hoc pairing sessions, write weekly update |
 
-If you're counting, actual coding is maybe two to three blocks out of ten. That's not because coding doesn't matter — it absolutely does — but because my highest-leverage work happens in those other seven blocks.
+If you count, actual coding is maybe two to three blocks out of ten. That is not because coding stopped mattering — it absolutely matters — but because the highest-leverage work happens in those other seven blocks.
 
 <Info>
-The ratio shifts depending on the company stage. At Weel (startup), I coded more like 50% of the time because the team was smaller and every hand mattered. At Atlassian (thousands of engineers), it was closer to 20% because the coordination and strategy surface area was massive.
+The ratio shifts depending on company stage and team size. In a smaller startup, I coded closer to 50% of the time because every hand mattered. In a large engineering organization with hundreds of engineers, it dropped to roughly 20% because the coordination surface area was massive.
 </Info>
 
 ## From Best IC to Force Multiplier
 
-The hardest part of becoming a staff engineer is accepting that your individual output matters less than your organizational output. At senior level, you're rewarded for shipping great code fast. At staff level, you're rewarded for making entire teams ship great code faster.
+The hardest part of becoming a staff engineer is accepting that your individual output matters less than your organizational output. At senior level, you are rewarded for shipping great code fast. At staff level, you are rewarded for making entire teams ship great code faster.
 
-This means your metrics change. Instead of "how many features did I ship?" the questions become:
+Your metrics change completely:
 
-- How many architectural decisions did I unblock?
-- How many engineers leveled up because of my mentorship?
-- How many cross-team conflicts did I resolve before they became crises?
-- How many bad technical bets did I help the org avoid?
+| Senior Engineer Measures | Staff Engineer Measures |
+|--------------------------|------------------------|
+| Features shipped | Architectural decisions unblocked |
+| Code quality of personal PRs | Engineers who leveled up through your mentorship |
+| Technical complexity handled | Cross-team conflicts resolved before they became crises |
+| Velocity and throughput | Bad technical bets the org avoided |
 
-None of these show up in a git log. That's uncomfortable if your identity is tied to your commit history.
+None of the staff measures show up in a git log. That is uncomfortable if your identity is tied to your commit history.
 
-## Owning Technical Direction Without Being a Manager
+## The Lonely Middle Ground
 
-Staff engineers sit in a weird organizational limbo. You own technical direction but nobody reports to you. You're responsible for system-level outcomes but you can't tell anyone what to do. You have to influence through persuasion, trust, and the quality of your ideas.
+Here is something I wish someone had told me earlier: staff engineering can be lonely. You are no longer purely part of the engineering team's daily rhythm. You sit in meetings with directors and VPs where you are the only IC. You think about problems on a six-to-twelve month horizon while your team thinks week-to-week.
 
-At Atlassian, I owned the frontend platform strategy for a product area with six teams. That meant I decided (well, "decided" — more like "built consensus around") which frameworks we adopted, how we structured shared libraries, and what our migration path looked like. But if a team disagreed, I couldn't mandate anything. I had to make the case so compelling that teams chose to follow it.
+The engineers on your team respect you but see you as somewhat separate — the person who shows up to standups sometimes but spends most of the day in "mysterious meetings." The managers include you in leadership discussions, but you are not a manager. You exist in an organizational gap.
 
-This is simultaneously the most rewarding and most frustrating aspect of the job. When it works, you see technical direction emerge organically across teams because people genuinely believe it's the right approach. When it doesn't work, you watch teams make decisions you know will cause pain, and you have to decide whether to escalate or let it play out.
+| Relationship | How It Feels |
+|-------------|-------------|
+| With your team | You're present but not fully embedded in daily flow |
+| With other staff engineers | Your true peers, but scattered and rarely in the same room |
+| With managers and directors | Included in strategy, but you don't carry the people-management weight |
+| With senior leadership | You translate between technical reality and business goals |
+
+Building a deliberate peer network — other staff and principal engineers you can be candid with — is one of the most important investments you can make.
+
+<Warning>
+If you do not actively maintain your technical skills, the gap between you and the codebase widens fast. Block at least two half-days per week for hands-on coding. It keeps you credible, keeps you grounded, and honestly — it keeps you sane.
+</Warning>
 
 ## Writing as a Core Competency
 
-I write more documents than code at this point, and I'm not exaggerating. RFCs, strategy docs, architecture decision records, one-pagers for leadership, post-incident reviews, onboarding guides. The written word is how staff engineers scale their influence beyond the meetings they attend.
+I write more documents than code at this point, and I am not exaggerating. RFCs, strategy docs, architecture decision records, one-pagers for leadership, post-incident reviews. The written word is how staff engineers scale their influence beyond the meetings they attend.
 
-A well-written RFC saves dozens of hours of meetings. A clear strategy document prevents months of misaligned work. A good architecture decision record means you don't have to re-explain the same trade-off to every new hire for the next two years.
+A well-written RFC saves dozens of hours of meetings. A clear strategy document prevents months of misaligned work. A solid architecture decision record means you do not have to re-explain the same trade-off to every new hire for the next two years.
 
 <Tip>
-If you're aspiring to staff, start writing now. Write design docs for your features even if your team doesn't require them. Write post-mortems that capture real lessons. Write proposals for problems you see. Your writing is your portfolio at this level.
+If you are aspiring to staff, start writing now. Write design docs for your features even if your team does not require them. Write post-mortems that capture real lessons. Write proposals for problems you see. Your writing portfolio matters more than your code at this level.
 </Tip>
 
-## Navigating Org Politics
+## Navigating the Breadth-vs-Depth Tension
 
-Nobody tells you about this part. Staff engineers operate at the intersection of technology and organization, and organizations are political by nature. I don't mean backstabbing and scheming — I mean navigating competing priorities, managing stakeholder expectations, and understanding that technical decisions are always made within an organizational context.
+You need to understand enough about a dozen different systems to make good cross-cutting decisions, but you also need to go deep enough on a few of them to maintain credibility and spot real issues in reviews.
 
-At Weel, the politics were simpler because the team was small. A conversation with the CTO and the product lead could align the entire company's technical direction. At Atlassian, the same alignment required months of relationship-building, multiple rounds of feedback, executive sponsorship, and careful sequencing of proposals to build momentum.
-
-Understanding how decisions actually get made in your organization is a staff-level skill. Who are the real decision-makers? What do they care about? What's the funding model? What are the political dynamics between teams? If you can't answer these questions, your brilliant technical proposal will die in a committee review.
-
-## The Loneliness of the Role
-
-Here's something I wish someone had told me earlier: staff engineering can be lonely. You're no longer purely part of the engineering team's daily rhythm. You sit in meetings with directors and VPs where you're the only IC. You think about problems on a 6-12 month horizon while your team thinks week-to-week. Your peers are other staff engineers scattered across the org, and you might only interact with them in monthly forums.
-
-At Atlassian, I found this particularly acute. The engineers on my team respected me but saw me as somewhat separate — I was the person who showed up to their standups sometimes but spent most of my day in "mysterious meetings." The managers included me in leadership discussions but I wasn't a manager. I existed in an organizational gap.
-
-<Warning>
-If you don't actively maintain your technical skills, the gap between you and the codebase will widen fast. I block at least two half-days per week for hands-on coding. It keeps me credible, keeps me grounded, and honestly — it keeps me sane.
-</Warning>
-
-## Staying Technical While Going Broad
-
-The breadth-vs-depth tension is real and ongoing. You need to understand enough about twelve different systems to make good cross-cutting decisions, but you also need to go deep enough on at least a few of them to maintain credibility and spot real issues in reviews.
-
-My approach: I maintain deep expertise in two or three areas (frontend architecture, API design, developer tooling) and cultivate "dangerous enough" knowledge in everything else (databases, infrastructure, security, mobile). I pair with specialists when I need to go deeper on something outside my core areas.
-
-The key is being honest about what you don't know. Staff engineers who pretend to be experts in everything lose trust fast. Staff engineers who say "I don't know enough about this — let me bring in someone who does" build trust just as fast.
+My approach: maintain deep expertise in two or three areas and cultivate "dangerous enough" knowledge in everything else. Pair with specialists when you need to go deeper on something outside your core. The key is radical honesty about what you do not know. Staff engineers who pretend to be experts in everything lose trust fast. Staff engineers who say "I don't know enough about this — let me bring in someone who does" build trust just as fast.
 
 ## Is It Worth It?
 
-Honestly? Some days I miss the simple satisfaction of writing a function, watching tests go green, and shipping a feature. There's a clarity to individual contribution that gets muddied at the staff level.
+Some days I miss the simple satisfaction of writing a function, watching tests go green, and shipping a feature. There is a clarity to individual contribution that gets muddied at the staff level.
 
-But then I see an engineer I mentored get promoted. Or I watch a cross-team migration go smoothly because we spent three months building consensus on the approach. Or I read a design doc from a team I've never worked with directly, and it follows the patterns I championed — not because I told them to, but because those patterns proved themselves.
+But then I see an engineer I mentored get promoted. Or I watch a cross-team migration go smoothly because we spent three months building consensus. Or I read a design doc from a team I have never worked with directly, and it follows the patterns I championed — not because I told them to, but because those patterns proved themselves.
 
-That's the payoff. It's slower, less visible, and harder to measure. But the blast radius of your impact is genuinely different. And for me, that trade-off is absolutely worth it.
+The blast radius of your impact is genuinely different. And for me, that trade-off is absolutely worth it.

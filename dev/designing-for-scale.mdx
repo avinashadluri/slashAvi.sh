@@ -3,293 +3,121 @@ title: "Designing Systems for 10x Traffic Without 10x Complexity"
 description: "Caching layers, read replicas, queue-based architectures, and the scaling patterns that let small teams handle big traffic."
 ---
 
+The most expensive scaling mistake isn't choosing the wrong technology. It's scaling prematurely — adding caching layers, read replicas, and message queues before you've identified where the actual bottleneck is. The second most expensive mistake is scaling too late — scrambling to add infrastructure under production load while users see 500 errors.
 
-The most expensive scaling mistake isn't choosing the wrong technology. It's scaling prematurely — adding caching layers, read replicas, and message queues before you've identified where the actual bottleneck is. The second most expensive mistake is scaling too late — scrambling to add infrastructure under production load while users are seeing 500 errors.
+I've done both. I've watched a team add Redis caching to a service that was CPU-bound (the cache didn't help — the bottleneck was JSON serialization). I've had to add queue-based processing to a synchronous endpoint that started timing out as traffic grew. Both experiences taught me the same lesson: **measure first, scale second, and always scale the bottleneck — not the thing you know how to scale.**
 
-I've done both. At Atlassian, I watched a team add Redis caching to a service that was CPU-bound (the cache didn't help — the bottleneck was JSON serialization). At Weel, I've had to add queue-based processing to a synchronous endpoint that started timing out as transaction volume grew. Both experiences taught me the same lesson: **measure first, scale second, and always scale the bottleneck, not the thing you know how to scale.**
+![Connected nodes and network](https://images.unsplash.com/photo-1507925921958-8a62f3d1a50d?w=800&auto=format&fit=crop&q=80)
 
-## The Scaling Mindset: Identify the Bottleneck First
+> "Everything fails, all the time." — Werner Vogels
+
+Werner's point isn't pessimism — it's a design philosophy. Build systems that expect failure and degrade gracefully, rather than systems that assume everything works perfectly and collapse when it doesn't.
+
+## Identify the Bottleneck First
 
 Before you add any infrastructure, answer one question: **what is actually slow?**
 
-```
-Request lifecycle — where is time spent?
-
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Client   │───▶│  Server  │───▶│ Database │───▶│ External │
-│  Network  │    │  Compute │    │  Queries │    │   APIs   │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘
-    ~50ms          ~10ms          ~5-500ms        ~100-2000ms
-```
-
-In my experience, the bottleneck distribution for typical web applications looks like:
+Here's the bottleneck distribution I've observed across typical web applications:
 
 | Bottleneck | Frequency | Typical Fix |
 |-----------|-----------|-------------|
-| **Unindexed database queries** | 40% | Add indexes, optimize queries |
-| **N+1 query patterns** | 20% | Eager loading, DataLoader, query restructuring |
-| **External API calls in request path** | 15% | Move to background jobs, cache responses |
-| **Missing application-level cache** | 10% | Redis/in-memory cache for hot data |
-| **Inefficient serialization** | 8% | Reduce payload size, paginate, stream |
-| **Actual compute bottleneck** | 5% | Horizontal scaling, optimize algorithms |
-| **Network/infrastructure** | 2% | CDN, connection pooling, regional deployment |
+| **Unindexed database queries** | ~40% | Add indexes, optimize queries |
+| **N+1 query patterns** | ~20% | Eager loading, DataLoader, query restructuring |
+| **External API calls in request path** | ~15% | Move to background jobs, cache responses |
+| **Missing application-level cache** | ~10% | Redis or in-memory cache for hot data |
+| **Inefficient serialization** | ~8% | Reduce payload size, paginate, stream |
+| **Actual compute bottleneck** | ~5% | Horizontal scaling, optimize algorithms |
+| **Network/infrastructure** | ~2% | CDN, connection pooling, regional deployment |
 
-Notice that 60% of performance problems are database-related. Before you reach for Redis or Kafka, check your query execution plans.
+Notice that roughly 60% of performance problems are database-related. Before you reach for Redis or Kafka, check your query execution plans.
 
 <Tip>
-The single highest-ROI performance improvement in any application is running `EXPLAIN ANALYZE` on your slowest queries. I've seen 100x improvements from a single composite index. No architecture change, no new infrastructure, just understanding what the database is actually doing.
+The single highest-ROI performance improvement in any application is running `EXPLAIN ANALYZE` on your slowest queries. I've seen 100x improvements from a single composite index. No architecture change, no new infrastructure — just understanding what the database is actually doing.
 </Tip>
 
-## Caching Strategies: The Three Layers
+## The Three Caching Layers
 
-Caching is the most effective scaling tool, but it's also the most dangerous. Every cache is a lie waiting to become stale. The trick is choosing the right cache for the right data.
+Caching is the most effective scaling tool, but every cache is a lie waiting to become stale. The trick is choosing the right layer for the right data.
 
-### Layer 1: CDN (Edge Cache)
+| Layer | What It Is | Best For | Watch Out For |
+|-------|-----------|----------|---------------|
+| **CDN / Edge** | Serves cached responses from servers closest to the user | Static assets, public pages, images, CSS/JS | Can't cache user-specific or authenticated data |
+| **Application Cache** (Redis) | Stores computed results in memory, shared across app instances | Expensive queries, frequently-read data, session data | Cache invalidation — stale data after writes |
+| **Database Layer** | Materialized views, query cache, read replicas | Aggregations, dashboards, reporting queries | Refresh frequency vs freshness trade-off |
 
-For static assets and responses that don't change per-user. This is the easiest win and should be your first move.
+Think of these layers as a funnel. The CDN catches the broadest set of requests before they ever reach your servers. The application cache handles hot data that changes infrequently. The database layer optimizes the queries that make it through both.
 
-```typescript
-// Next.js example — static page with ISR
-export const revalidate = 3600; // revalidate every hour
-
-// API route with cache headers
-export async function GET() {
-  const data = await getPublicPricingData();
-  return Response.json(data, {
-    headers: {
-      'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
-    },
-  });
-}
-```
-
-**Use for:** Marketing pages, public API responses, images, CSS/JS bundles.
-**Don't use for:** User-specific data, real-time data, authenticated responses.
-
-### Layer 2: Application Cache (Redis)
-
-For data that's expensive to compute or fetch but doesn't change frequently. This is where most teams start, and where most caching bugs live.
-
-```typescript
-class CachedOrganizationService {
-  constructor(
-    private readonly orgRepo: OrganizationRepository,
-    private readonly redis: RedisService,
-  ) {}
-
-  async getById(orgId: string): Promise<Organization> {
-    const cacheKey = `org:${orgId}`;
-    const cached = await this.redis.get(cacheKey);
-
-    if (cached) {
-      return JSON.parse(cached);
-    }
-
-    const org = await this.orgRepo.findByIdOrThrow(orgId);
-    await this.redis.set(cacheKey, JSON.stringify(org), 'EX', 300); // 5 min TTL
-
-    return org;
-  }
-
-  async update(orgId: string, data: UpdateOrgDto): Promise<Organization> {
-    const org = await this.orgRepo.update(orgId, data);
-    await this.redis.del(`org:${orgId}`); // Invalidate on write
-    return org;
-  }
-}
-```
+**The golden rule of caching:** invalidation is always harder than you expect. The simplest pattern — invalidate on write — works when writes happen through a single service. When multiple services write to the same data, you need event-driven invalidation or short TTLs. Short TTLs are almost always the pragmatic choice.
 
 <Warning>
-Cache invalidation is genuinely hard. The pattern above (invalidate on write) works when writes happen through a single service. When multiple services write to the same data, you need event-driven invalidation or short TTLs. I've been burned by stale caches in production more times than I'd like to admit.
+I've been burned by stale caches in production more times than I'd like to admit. If a cache is causing subtle data freshness bugs, lower the TTL before adding complex invalidation logic. A 30-second TTL covers most cases and is dramatically simpler than pub/sub-based invalidation.
 </Warning>
 
-### Layer 3: Database Query Cache
+## When You Need a Queue
 
-PostgreSQL has a built-in query cache, but it's invalidated on every write to the table. For read-heavy workloads with infrequent writes, materialized views are more effective:
+The moment any of these are true, you need a message queue:
 
-```sql
--- Materialized view for a dashboard summary
-CREATE MATERIALIZED VIEW org_transaction_summary AS
-SELECT
-  organization_id,
-  DATE_TRUNC('month', created_at) AS month,
-  COUNT(*) AS transaction_count,
-  SUM(amount_cents) AS total_cents,
-  AVG(amount_cents) AS avg_cents
-FROM transactions
-WHERE status = 'COMPLETED'
-GROUP BY organization_id, DATE_TRUNC('month', created_at);
+| Signal | Why a Queue Helps |
+|--------|------------------|
+| A request triggers work that takes > 500ms | Respond immediately, process in background |
+| The response doesn't need the result of that work | Decouple the user-facing path from side effects |
+| You need to retry failed operations | Queues have built-in retry with backoff |
+| You need to rate-limit calls to an external service | Queue acts as a buffer between your system and theirs |
+| Spiky traffic overwhelms a downstream service | Queue smooths the load curve |
 
--- Refresh on a schedule (e.g., every 15 minutes via cron job)
-REFRESH MATERIALIZED VIEW CONCURRENTLY org_transaction_summary;
-```
-
-## Read Replicas and Connection Pooling
-
-When your database is the bottleneck and you've already optimized queries, read replicas split the load.
+The pattern is simple: the API responds in milliseconds, the heavy processing happens asynchronously. If it fails, it retries automatically. If the worker crashes, the job stays in the queue.
 
 ```typescript
-// Prisma with read replicas using the @prisma/extension-read-replicas
-import { readReplicas } from '@prisma/extension-read-replicas';
-
-const prisma = new PrismaClient().$extends(
-  readReplicas({
-    url: process.env.DATABASE_REPLICA_URL!,
-  }),
-);
-
-// Reads automatically go to replica
-const users = await prisma.user.findMany();
-
-// Writes go to primary
-const newUser = await prisma.user.create({ data: { ... } });
-
-// Force read from primary when you need consistency
-const freshUser = await prisma.$primary().user.findUnique({
-  where: { id: userId },
-});
-```
-
-**Connection pooling** is the unsung hero of database scaling. Without it, every request opens a new database connection (expensive — ~50ms handshake). With it, connections are reused.
-
-```
-Without pooling:           With pooling (PgBouncer):
-┌─────────┐               ┌─────────┐
-│ App (50 │──50 conns──▶  │ App (50 │──50 conns──▶ ┌──────────┐
-│requests)│               │requests)│              │ PgBouncer│──10 conns──▶ DB
-└─────────┘               └─────────┘              └──────────┘
-
-Each request = new conn     Connections reused, DB sees only 10
-DB max_connections = 100    DB max_connections = 100 serves 500+ app instances
-```
-
-<Info>
-At Weel, we use PgBouncer in transaction mode in front of PostgreSQL. This lets us run many more application instances than we have database connections — a critical scaling lever when you're running auto-scaling container groups.
-</Info>
-
-## Queue-Based Architectures
-
-The moment any of these are true, you need a queue:
-
-- A request triggers work that takes more than 500ms
-- The response doesn't need to include the result of that work
-- You need to retry failed operations
-- You need to rate-limit calls to an external service
-
-```typescript
-// BullMQ example — processing expense reports
-import { Queue, Worker } from 'bullmq';
-
 const expenseQueue = new Queue('expense-processing', {
-  connection: { host: 'redis', port: 6379 },
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
-    removeOnComplete: { count: 1000 },
-    removeOnFail: { count: 5000 },
   },
 });
 
-// API endpoint — returns immediately
 async function submitExpense(req: Request, res: Response) {
   const expense = await createExpenseRecord(req.body);
-  await expenseQueue.add('process', {
-    expenseId: expense.id,
-    receipts: expense.receiptUrls,
-  });
+  await expenseQueue.add('process', { expenseId: expense.id });
   res.status(202).json({ id: expense.id, status: 'processing' });
 }
-
-// Worker — processes in the background
-const worker = new Worker('expense-processing', async (job) => {
-  const { expenseId, receipts } = job.data;
-
-  await extractReceiptData(receipts);    // OCR — slow
-  await categorizeExpense(expenseId);    // ML model — slow
-  await checkPolicyCompliance(expenseId); // Rule engine
-  await notifyApprover(expenseId);       // Email
-
-  await updateExpenseStatus(expenseId, 'ready_for_review');
-}, { connection: { host: 'redis', port: 6379 }, concurrency: 5 });
 ```
 
-The API responds in milliseconds. The heavy processing happens asynchronously. If it fails, it retries automatically. If the worker crashes, the job stays in the queue and gets picked up when the worker restarts.
+The `202 Accepted` response is the key — it tells the client "I received your request and will process it" without blocking on the slow work.
 
-## Rate Limiting and Circuit Breakers
+## Horizontal vs. Vertical Scaling
 
-These are defensive scaling patterns — they don't make your system faster, they prevent it from falling over.
+This decision trips up a lot of teams. Here's the decision framework:
 
-```typescript
-// Simple token bucket rate limiter with Redis
-async function rateLimit(
-  key: string,
-  maxRequests: number,
-  windowSeconds: number,
-): Promise<{ allowed: boolean; remaining: number }> {
-  const current = await redis.incr(key);
-  if (current === 1) {
-    await redis.expire(key, windowSeconds);
-  }
-  return {
-    allowed: current <= maxRequests,
-    remaining: Math.max(0, maxRequests - current),
-  };
-}
+| Signal | Scale Vertically (bigger machine) | Scale Horizontally (more machines) |
+|--------|----------------------------------|------------------------------------|
+| CPU consistently > 80% | Bigger instance (quick win) | More instances behind load balancer |
+| Memory consistently > 80% | More RAM | Redesign to reduce per-instance memory |
+| Single-threaded bottleneck | Faster CPU clock speed | Worker threads or more instances |
+| Database connections maxed | Bigger DB + connection pooling | Read replicas |
+| Predictable traffic | Reserved instances (cheaper) | Auto-scaling groups |
+| Unpredictable spikes | Won't help | Auto-scaling with queue buffering |
 
-// Circuit breaker for external API calls
-class CircuitBreaker {
-  private failures = 0;
-  private lastFailure = 0;
-  private state: 'closed' | 'open' | 'half-open' = 'closed';
+**My general approach:** scale vertically until it gets expensive, then scale horizontally. Vertical scaling is simpler — no distributed systems concerns, no state synchronization, no load balancer config. A beefy single instance handles more traffic than most people expect.
 
-  constructor(
-    private readonly threshold: number = 5,
-    private readonly resetTimeout: number = 30_000,
-  ) {}
+<Info>
+Connection pooling is the unsung hero of database scaling. Without it, every request opens a new database connection (~50ms handshake). With a connection pooler like PgBouncer in front of PostgreSQL, your application instances share a smaller pool of connections. This lets you run many more app instances than you have database connections — a critical scaling lever for auto-scaling setups.
+</Info>
 
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.state === 'open') {
-      if (Date.now() - this.lastFailure > this.resetTimeout) {
-        this.state = 'half-open';
-      } else {
-        throw new Error('Circuit breaker is open');
-      }
-    }
+## Defensive Patterns: Rate Limiting and Circuit Breakers
 
-    try {
-      const result = await fn();
-      this.onSuccess();
-      return result;
-    } catch (error) {
-      this.onFailure();
-      throw error;
-    }
-  }
+These don't make your system faster — they prevent it from falling over.
 
-  private onSuccess() { this.failures = 0; this.state = 'closed'; }
-  private onFailure() {
-    this.failures++;
-    this.lastFailure = Date.now();
-    if (this.failures >= this.threshold) this.state = 'open';
-  }
-}
-```
+| Pattern | What It Does | When to Use |
+|---------|-------------|-------------|
+| **Rate limiting** | Caps requests per client/IP/API key per time window | Public APIs, login endpoints, any abuse-prone surface |
+| **Circuit breaker** | Stops calling a failing downstream service, fails fast instead | External API integrations, cross-service calls |
+| **Bulkhead** | Isolates resources so one failing component can't starve others | Thread pools, connection pools per dependency |
+| **Backpressure** | Slows down producers when consumers can't keep up | Queue-based systems, streaming pipelines |
 
-## Horizontal vs Vertical Scaling: A Decision Framework
-
-| Signal | Scale Vertically | Scale Horizontally |
-|--------|------------------|--------------------|
-| **CPU consistently > 80%** | Bigger instance (quick win) | More instances behind load balancer |
-| **Memory consistently > 80%** | More RAM | Redesign to reduce per-instance memory |
-| **Single-threaded bottleneck** | Faster CPU clock speed | Worker threads or more instances |
-| **Database connections maxed** | Bigger DB instance + connection pooling | Read replicas |
-| **Predictable traffic patterns** | Reserved instances (cheaper) | Auto-scaling groups |
-| **Unpredictable spikes** | Won't help | Auto-scaling with queue buffering |
-
-My general approach: **scale vertically until it's expensive, then scale horizontally.** Vertical scaling is simpler — no distributed systems concerns, no state synchronization, no load balancer configuration. A beefy single instance handles more traffic than most people expect.
+The circuit breaker deserves special attention. When an external service is down and you keep hammering it with retries, you're making both systems worse — yours (blocked threads, timeout accumulation) and theirs (load during recovery). A circuit breaker detects the failure, stops trying for a cooldown period, then cautiously retries. It's the engineering equivalent of "if at first you don't succeed, stop and think before trying again."
 
 <Tip>
-The cheapest scaling strategy is writing efficient code. Before adding infrastructure, profile your application. I've seen a single `JSON.stringify` call on a 10MB object add 200ms to every request. Fixing that one line was cheaper than adding three more application instances.
+The cheapest scaling strategy is writing efficient code. Before adding infrastructure, profile your application. I've seen a single `JSON.stringify` call on a large object add 200ms to every request. Fixing that one line was cheaper than adding three more instances.
 </Tip>
 
-The goal isn't to build a system that handles 10x traffic. It's to build a system that can *evolve* to handle 10x traffic without a rewrite. That means clean separation between stateless compute and stateful storage, well-defined API boundaries, and the discipline to measure before you optimize. The infrastructure should grow with the traffic, not ahead of it.
+The goal isn't to build a system that handles 10x traffic today. It's to build a system that can *evolve* to handle 10x traffic without a rewrite. Clean separation between stateless compute and stateful storage, well-defined API boundaries, and the discipline to measure before you optimize. The infrastructure should grow with the traffic, not ahead of it.

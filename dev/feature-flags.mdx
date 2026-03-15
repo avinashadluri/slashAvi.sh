@@ -3,169 +3,107 @@ title: "Feature Flags Changed How I Ship — A Before-and-After Story"
 description: "Progressive rollouts, kill switches, and the deployment confidence that feature flags give a team."
 ---
 
+![Team monitoring a dashboard during a progressive rollout](https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&auto=format&fit=crop&q=80)
 
-There's a moment every engineer knows — the cold sweat after clicking "Deploy" on a Friday afternoon. Your stomach drops. You watch the metrics dashboard like it owes you money. You refresh Sentry every 3 seconds. You think about all the things you forgot to test.
+You know the feeling. It's Friday afternoon. You click "Deploy." Your stomach drops. You refresh the error dashboard every three seconds. You think about all the paths you forgot to test. You quietly calculate how long a rollback would take.
 
 Feature flags eliminated that feeling for me. Not reduced it — eliminated it. Deploying became a non-event. The code ships to production behind a flag, invisible to users. You flip the flag when you're ready. You flip it back if something goes wrong. That shift — from "deploy and pray" to "deploy and control" — fundamentally changed how I think about shipping software.
 
+> "If you're not shipping every day, you're warehousing risk."
+> — Dave Farley
+
 ## The Before: Deploy Fear
 
-At a previous company (before Atlassian), deployments were ceremonies. We'd batch two weeks of work into a single deploy. There was a deploy checklist. A deploy captain. A rollback plan that nobody had actually tested. We deployed on Tuesdays because "that gives us the week to fix things."
+On a project I worked on years ago, deployments were ceremonies. We batched two weeks of work into a single release. There was a deploy checklist, a deploy captain, and a rollback plan that nobody had actually tested. We deployed on Tuesdays because "that gives us the week to fix things."
 
-The failure mode was predictable: big deploys meant big blast radius. When something broke (and it always did), we couldn't tell which of the 47 changes caused it. Rollbacks took an hour because the database had migrated. Engineers developed deploy anxiety — some literally avoided merging their PRs near deploy day.
+The failure mode was predictable: big deploys meant a big blast radius. When something broke (and it always did), we couldn't tell which of the 40+ changes caused it. Rollbacks took over an hour because the database had migrated. Engineers developed deploy anxiety — some literally avoided merging their PRs near deploy day.
 
 ## The After: Deploy Confidence
 
-At Weel, we deploy to production 15-20 times per day. No ceremony. No deploy captain. No cold sweats. Every meaningful change ships behind a feature flag. The deploy is the boring part — it just moves code. The flag flip is the interesting part — it activates behaviour.
+On a later project, we deployed to production 15-20 times per day. No ceremony. No deploy captain. No cold sweats. Every meaningful change shipped behind a feature flag. The deploy was the boring part — it just moved code. The **flag flip** was the interesting part — it activated behaviour.
 
-Here's what that looks like in practice:
+<Tip>
+The key mental shift: **deploying** and **releasing** are two different things. A deploy puts code on servers. A release makes it visible to users. Feature flags decouple the two, and that decoupling changes everything.
+</Tip>
 
-```typescript
-import { useFeatureFlag } from '@/lib/feature-flags';
+## Types of Feature Flags
 
-export function PaymentForm() {
-  const showNewValidation = useFeatureFlag('payments.enhanced-validation');
+Not all flags are equal. Each type has a different purpose, lifespan, and owner. Understanding this prevents flag sprawl.
 
-  return (
-    <form onSubmit={handleSubmit}>
-      {showNewValidation ? (
-        <EnhancedValidation rules={validationRules} />
-      ) : (
-        <LegacyValidation />
-      )}
-      <SubmitButton />
-    </form>
-  );
-}
-```
+| Flag Type | Purpose | Typical Lifespan | Owner | Example |
+|-----------|---------|-----------------|-------|---------|
+| **Release** | Gate incomplete features during development | Days to weeks | Feature team | `payments.new-checkout-flow` |
+| **Experiment** | A/B test variations for product decisions | Weeks to months | Product / Growth | `signup.social-proof-variant` |
+| **Operational** | Control system behaviour under stress | Permanent | Platform team | `api.rate-limit-aggressive` |
+| **Permission** | Gate features by user plan or segment | Permanent | Product | `plan.enterprise-analytics` |
 
-The code for both paths is in production. Users see one or the other based on the flag state. When we're confident the new validation works, we flip the flag to 100% and remove the old code path. No deploy required for the rollout.
+The most common mistake? Treating all flags like release flags. Operational flags are permanent infrastructure — they don't need cleanup. Release flags are temporary scaffolding — they absolutely do.
 
-## Flag Types
+## Progressive Rollout: The Real Power
 
-Not all flags are created equal. I categorize them into four types, each with different lifecycles and ownership:
+This is where feature flags become genuinely powerful. Instead of all-or-nothing, you control exactly who sees a change and when. Think of it as turning a dimmer switch instead of flipping a light on.
 
-| Flag Type | Purpose | Lifespan | Owner | Example |
-|-----------|---------|----------|-------|---------|
-| Release | Gate incomplete features | Days to weeks | Feature team | `payments.new-checkout-flow` |
-| Experiment | A/B test variations | Weeks to months | Product/Growth | `signup.social-proof-variant` |
-| Ops | Control operational behaviour | Permanent | Platform team | `api.rate-limit-aggressive` |
-| Permission | Gate features by user segment | Permanent | Product | `plan.enterprise-analytics` |
+| Stage | Audience | What You Watch | Duration |
+|-------|---------|---------------|----------|
+| **1. Internal** (0.5%) | Your engineering team | Obvious bugs, broken flows | 1-2 days |
+| **2. Canary** (1-5%) | Small slice of real users | Error rates, latency, exceptions | 1-2 days |
+| **3. Early rollout** (10-25%) | Broader user base | Degradation vs. control group | 2-3 days |
+| **4. Majority** (50%) | Half of users | Statistically significant A/B metrics | 3-5 days |
+| **5. Full rollout** (100%) | Everyone | Confirmation, then schedule cleanup | 1 week max |
 
-<Warning>
-Release flags that live longer than 30 days are tech debt. They accumulate conditionals, complicate testing, and confuse new engineers who don't know which path is "the real one." Track flag age and enforce cleanup.
-</Warning>
-
-## Progressive Rollout Strategy
-
-This is where feature flags become genuinely powerful. Instead of an all-or-nothing deploy, you control exactly who sees the change and when:
-
-**Stage 1 — Internal (0.5%):** Flag on for the engineering team only. We dogfood the feature for a day or two, catch obvious issues.
-
-**Stage 2 — Canary (1-5%):** Flag on for a small percentage of real users. We watch error rates, latency, and user behaviour metrics closely.
-
-**Stage 3 — Early Rollout (10-25%):** If canary looks clean, expand. At this stage, I set up alerts for any degradation compared to the control group.
-
-**Stage 4 — Majority (50%):** Half the users see the new feature. This is where A/B metrics become statistically significant. Product reviews the data.
-
-**Stage 5 — Full Rollout (100%):** Feature is fully live. The flag stays for a week as a kill switch, then we schedule cleanup.
-
-```typescript
-// Flag configuration in LaunchDarkly / Unleash
-const flagConfig = {
-  key: 'payments.enhanced-validation',
-  targeting: [
-    { segment: 'internal-team', percentage: 100 },
-    { segment: 'beta-users', percentage: 100 },
-    { segment: 'all-users', percentage: 10 },
-  ],
-  fallthrough: { variation: false },
-  killSwitch: true,
-};
-```
-
-At Weel, we rolled out a new payment processing flow this way. Stage 2 caught a timezone bug that only affected users in Perth. We fixed it before 99% of users ever saw the feature. Without progressive rollout, that bug would've hit everyone simultaneously.
+On one project, a progressive rollout caught a timezone bug that only affected users in one region during stage 2. We fixed it before 99% of users ever saw the feature. Without progressive rollout, that bug would have hit everyone simultaneously.
 
 ## The Kill Switch
 
-Every flag is a kill switch. When production breaks at 2 AM, the fastest remediation isn't a rollback — it's flipping a flag. At Atlassian, during one incident, we disabled a problematic search indexing feature in 8 seconds via a flag toggle. A code rollback would have taken 20 minutes.
+Every feature flag is also a kill switch. When production breaks at 2 AM, the fastest remediation isn't a code rollback — it's flipping a flag off. I've seen a flag toggle resolve an incident in under 10 seconds. A code rollback for the same issue would have taken 20 minutes.
 
-I wire kill switches into our incident response playbook:
+Wire kill switches into your incident response playbook. Name your flags with namespace prefixes (`payments.`, `auth.`, `search.`) so during an incident you can quickly find and disable all flags related to the affected system.
 
-```typescript
-// Incident response: disable feature immediately
-async function emergencyDisable(flagKey: string, reason: string) {
-  await flagClient.update(flagKey, {
-    on: false,
-    comment: `Emergency disable: ${reason} | Incident: ${incidentId}`,
-  });
-
-  await slack.post('#incidents', {
-    text: `Kill switch activated: ${flagKey}\nReason: ${reason}`,
-  });
-}
-```
-
-<Tip>
-Name your flags with a namespace prefix (`payments.`, `auth.`, `search.`) so during an incident you can quickly find and disable all flags related to the affected system. Naming conventions matter most when you're panicking.
-</Tip>
+<Warning>
+Naming conventions matter most when you're panicking. Agree on a flag naming scheme before you need one at 3 AM. `team.feature-name` is simple and searchable.
+</Warning>
 
 ## Choosing a Flag System
 
-I've used three systems in production. Here's my honest take:
-
 | System | Best For | Trade-offs |
 |--------|----------|------------|
-| LaunchDarkly | Enterprise teams, complex targeting | Expensive, but the targeting and analytics are unmatched |
-| Unleash | Self-hosted, privacy-conscious orgs | Open source, but the UI and analytics are weaker |
-| Custom (DB + cache) | Simple on/off flags, budget-conscious | Full control, but you'll eventually rebuild LaunchDarkly poorly |
+| **LaunchDarkly** | Enterprise teams, complex targeting | Excellent analytics and rollout tools, but expensive |
+| **Unleash** | Self-hosted, privacy-conscious teams | Open source with full control, weaker UI and analytics |
+| **Custom (DB + cache)** | Simple on/off toggles, small teams | Full ownership, but you'll eventually rebuild a flag platform poorly |
+| **PostHog / Statsig** | Product-led teams needing built-in analytics | Good all-in-one, less flexibility on targeting rules |
 
-At Weel, we use LaunchDarkly. The cost is justified by the progressive rollout capabilities and the analytics that let product measure feature impact directly from the flag dashboard.
+Start with what you can adopt this week. A simple boolean flag in a database is infinitely better than no flags at all. You can upgrade the system later.
 
 ## Flag Hygiene: The Cleanup Problem
 
 Here's the uncomfortable truth: feature flags create tech debt. Every flag is a branch in your code. Two flags mean four possible states. Ten flags mean 1,024 possible states. Most of those combinations are never tested.
 
-My cleanup process:
+**The cleanup checklist:**
 
-1. **Flag age tracking.** A weekly Slack bot lists all flags older than 30 days with their current state.
-2. **Mandatory cleanup tickets.** When a flag reaches 100% rollout, a Jira ticket is auto-created for code cleanup with a 2-week due date.
-3. **Lint rules.** We have an ESLint rule that flags (pun intended) any feature flag reference that's been at 100% for more than 14 days.
+- [ ] Track flag age — a weekly report lists all flags older than 30 days
+- [ ] Auto-create cleanup tickets when a flag reaches 100% rollout (2-week due date)
+- [ ] Add lint rules that warn on flag references that have been at 100% for over 14 days
+- [ ] Assign a flag hygiene owner each sprint — one person reviews the stale flag list
+- [ ] Include flag cleanup in your team's definition of "done" for a feature
 
-```typescript
-// eslint-plugin-flag-hygiene (simplified)
-const STALE_FLAG_THRESHOLD_DAYS = 14;
-
-export const rules = {
-  'no-stale-flags': {
-    create(context) {
-      return {
-        CallExpression(node) {
-          if (isFeatureFlagCall(node)) {
-            const flagKey = getFlagKey(node);
-            const flagAge = getFlagAge(flagKey);
-            if (flagAge > STALE_FLAG_THRESHOLD_DAYS) {
-              context.report({
-                node,
-                message: `Flag "${flagKey}" has been at 100% for ${flagAge} days. Remove the flag and dead code.`,
-              });
-            }
-          }
-        },
-      };
-    },
-  },
-};
-```
+If you skip cleanup, you end up with a codebase where nobody knows which code path is "the real one." New engineers are especially confused. Treat stale flags like any other tech debt — track it, prioritize it, pay it down.
 
 ## The Organizational Shift
 
-Feature flags aren't just a technical tool — they change how your organisation thinks about shipping. Product managers stop asking "when will it deploy?" and start asking "what percentage are we at?" QA tests against flag states instead of release branches. Designers can see their work in production behind a flag before it's "launched."
+Feature flags aren't just a technical tool — they change how your whole team thinks about shipping.
 
-The biggest shift is psychological. When deploying is decoupled from releasing, engineers stop fearing deploys. They push smaller changes more often. The whole team moves faster because the risk of any single change is near zero.
+| Role | Before Flags | After Flags |
+|------|-------------|-------------|
+| **Engineers** | Fear deploys, batch changes | Push small changes daily, deploy is boring |
+| **Product Managers** | Ask "when will it deploy?" | Ask "what percentage are we at?" |
+| **QA** | Test against release branches | Test against flag states in production |
+| **Designers** | See their work only after launch | Preview work behind a flag before it's "live" |
+| **Support** | Blindsided by new features | Prepared in advance, can check flag state per user |
+
+The biggest shift is psychological. When deploying is decoupled from releasing, engineers stop fearing deploys. They push smaller changes more often. The whole team moves faster because the risk of any single change approaches zero.
 
 <Info>
-Feature flags are the gateway drug to continuous deployment. Once your team experiences the confidence of flagged rollouts, they'll never go back to batched releases. The before/after is that stark.
+Feature flags are the gateway to continuous deployment. Once your team experiences the confidence of flagged rollouts, they'll never go back to batched releases. The before-and-after is that stark.
 </Info>
 
 That cold sweat I mentioned at the beginning? I genuinely don't feel it anymore. Not because I'm reckless — because I have a kill switch in my pocket at all times.

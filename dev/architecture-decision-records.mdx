@@ -3,176 +3,110 @@ title: "Architecture Decision Records: How I Make Bets That Don't Blow Up in 6 M
 description: "ADRs, trade-off analysis, and the decision-making framework I use before committing to any technical direction."
 ---
 
+Every technical disaster I've witnessed started the same way: someone made a reasonable-sounding decision, didn't write down why, and six months later nobody could remember the constraints that led to it. The team either cargo-culted around a decision they didn't understand or reversed it without grasping the original trade-offs — stepping on the same landmine from a different angle.
 
-Every technical disaster I've witnessed — and I've witnessed a few — started the same way: someone made a reasonable-sounding decision, didn't write down why, and six months later nobody could remember the constraints that led to it. The team either cargo-culted around a decision they didn't understand or reversed it without understanding the original trade-offs, stepping on the same landmine from a different angle.
+Architecture Decision Records fix this. Not because they're fancy or process-heavy — because they're a forcing function for clear thinking. Writing down "why" is harder than it sounds, and the act of doing it catches bad reasoning before it ships.
 
-Architecture Decision Records (ADRs) are the fix. Not because they're fancy or process-heavy — because they're a forcing function for clear thinking. Writing down "why" is harder than it sounds, and the act of doing it catches bad reasoning before it ships.
+![Team planning at a whiteboard](https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&auto=format&fit=crop&q=80)
 
-## Why Most Teams Skip ADRs (and Pay for It Later)
+> "The best architectures, requirements, and designs emerge from self-organizing teams — but only if those teams write things down." — Martin Fowler
+
+## Why Teams Skip ADRs (and Pay for It Later)
 
 The objections are always the same: "We move too fast for documentation." "Everyone was in the meeting — we all know why." "We'll remember."
 
-You won't. I've been on teams at Atlassian with 50+ engineers where a decision made in Q1 was being questioned in Q3 by people who joined in Q2. Without an ADR, the answer is always "I think it was because..." followed by an archaeology expedition through Slack messages and PR descriptions.
+You won't. I've been on teams with dozens of engineers where a decision made in Q1 was questioned in Q3 by people who joined in Q2. Without an ADR, the answer is always "I think it was because..." followed by an archaeology expedition through Slack threads and PR descriptions.
 
-At Weel, we're a smaller team, and ADRs matter even more. When you're a startup with 10 engineers, every architectural decision carries disproportionate weight. Choose the wrong database, the wrong framework, the wrong deployment model — and you're living with it for years because you don't have the headcount to redo it.
+On smaller teams the stakes are even higher. When you're a team of 10 engineers, every architectural choice carries disproportionate weight. Choose the wrong database, the wrong deployment model — and you're living with it for years because you don't have the headcount to redo it.
 
 <Info>
-ADRs aren't about bureaucracy. A good ADR takes 30 minutes to write and saves dozens of hours of future debate. The best ones are under 500 words.
+A good ADR takes 30 minutes to write and saves dozens of hours of future debate. The best ones are under 500 words. This isn't bureaucracy — it's leverage.
 </Info>
 
-## The Template I Use
+## The Simple ADR Template
 
-I've tried several ADR formats — Michael Nygard's original, the Y-statement format, MADR. I've converged on this one because it's lightweight enough to actually get written:
+I've tried several formats — Michael Nygard's original, MADR, the Y-statement format. I've converged on a structure that's lightweight enough to actually get written. Here it is as a reference, not a wall of markdown:
 
-```markdown
-# ADR-{number}: {Title}
+| Section | What Goes Here | Length |
+|---------|---------------|--------|
+| **Title** | ADR-001: Short descriptive name | 1 line |
+| **Date & Status** | Date, plus one of: Proposed, Accepted, Superseded, Deprecated | 1 line |
+| **Context** | What problem are we solving? What forces are at play — technical, organizational, timeline? | 2-4 sentences |
+| **Options Considered** | 2-3 options with pros, cons, and estimated effort for each | A few bullets per option |
+| **Decision** | Which option we chose and *why* — the reasoning, not just the name | 2-3 sentences |
+| **Consequences** | Positive outcomes, negative trade-offs, and known risks | Bullet list |
+| **Review Date** | When we should revisit this decision | 1 line |
 
-**Date:** YYYY-MM-DD
-**Status:** Proposed | Accepted | Superseded by ADR-XXX | Deprecated
-**Deciders:** {names}
+The **Review Date** is the most underrated field. It forces you to acknowledge that decisions have shelf lives. The technology landscape changes. Your team size changes. A decision that was correct 12 months ago might be wrong today — and that's fine, as long as you have a mechanism to revisit it.
 
-## Context
+## The Two-Way Door Framework
 
-What is the issue that we're seeing that is motivating this decision?
-What are the forces at play (technical, organizational, time, cost)?
-What constraints exist that narrow the solution space?
+Jeff Bezos popularized this concept, and it's the most useful mental model I've found for deciding *how much process* a decision deserves.
 
-## Options Considered
+| | One-Way Door | Two-Way Door |
+|---|---|---|
+| **Definition** | Difficult or impossible to reverse | Easy to reverse with low cost |
+| **Examples** | Primary database, programming language, cloud provider lock-in | CSS library, test framework, linting config |
+| **Process** | ADR, thorough analysis, stakeholder buy-in | Quick decision by the person closest to the work |
+| **Time to decide** | Days to weeks | Hours |
+| **Failure mode** | Under-analyzing → expensive mistakes | Over-analyzing → wasted time on trivial choices |
 
-### Option A: {Name}
-- Pros: ...
-- Cons: ...
-- Estimated effort: ...
+The failure mode I see most often: teams treat two-way doors like one-way doors. They spend three weeks debating Jest vs Vitest when the migration cost is a half-day of find-and-replace. Meanwhile, they treat one-way doors — like "let's use a proprietary NoSQL database for everything" — as two-way doors and commit after a 30-minute Slack discussion.
 
-### Option B: {Name}
-- Pros: ...
-- Cons: ...
-- Estimated effort: ...
+<Warning>
+If the reversal cost is measured in weeks or months, or if the blast radius spans your entire platform, it's a one-way door. Write the ADR. If it's a single service and reversible in hours — just decide and move.
+</Warning>
 
-### Option C: {Name} (if applicable)
-- Pros: ...
-- Cons: ...
-- Estimated effort: ...
+## Real Trade-Off Examples
 
-## Decision
+ADRs shine when you're comparing concrete options. Here's how a comparison table does the heavy lifting:
 
-We will go with **Option X** because {reasoning}.
-
-## Consequences
-
-### Positive
-- ...
-
-### Negative
-- ...
-
-### Risks
-- ...
-
-## Review Date
-
-{Date by which we should revisit this decision}
-```
-
-The `Review Date` field is the most underrated part. It forces you to acknowledge that decisions have shelf lives. The technology landscape changes. Your team size changes. Your traffic patterns change. A decision that was correct 12 months ago might be wrong today, and that's fine — as long as you have a mechanism to revisit it.
-
-## Real ADR Examples
-
-### ADR: NestJS over Express for the Weel Backend
-
-This was a real decision we made when rebuilding parts of the Weel backend.
-
-| Criteria | Express | NestJS |
-|----------|---------|--------|
-| **Learning curve** | Low — team already knows it | Medium — decorators, DI, modules |
-| **Structure at scale** | DIY — requires discipline | Opinionated — enforces consistency |
-| **Testing** | Manual DI setup per test | Built-in testing module with DI |
-| **Team size trajectory** | Works for 2-3 engineers | Scales to 10+ without architecture drift |
-| **Ecosystem** | Massive, fragmented | Smaller, cohesive |
-| **Cold start (serverless)** | Fast | Slower (DI container init) |
-
-**Decision:** NestJS. Our backend was growing from 15 endpoints to 60+, and we were adding engineers. Express gave us freedom we were abusing — four different patterns for error handling, three for validation. NestJS's opinions would prevent that divergence.
-
-**Consequence we accepted:** Slower cold starts ruled out serverless for some functions. We'd use long-running containers instead. Engineers needed 1-2 weeks to learn NestJS patterns. The trade-off was worth it for a team that was going to double in size.
-
-### ADR: tRPC over GraphQL for Internal APIs
+**Example: Choosing an internal API approach**
 
 | Criteria | GraphQL | tRPC | REST |
 |----------|---------|------|------|
 | **Type safety** | Codegen required (extra build step) | End-to-end, zero codegen | Manual types or codegen |
 | **Client complexity** | Apollo/urql, cache management | Simple function calls | fetch + types |
-| **Schema evolution** | Versioning via deprecation | Breaking changes caught at compile time | URL versioning |
 | **Public API suitability** | Excellent | Poor (TypeScript-only) | Excellent |
-| **Team familiarity** | Moderate | Low (new to most) | High |
+| **Team familiarity** | Moderate | Low (newer technology) | High |
+| **Verdict for internal API** | Overhead without payoff | Best fit if TS end-to-end | Best fit if multi-language |
 
-**Decision:** tRPC for internal APIs between our Next.js frontend and NestJS backend. REST for any external-facing APIs.
-
-**The reasoning:** We're a TypeScript shop end-to-end. tRPC gives us type safety from database to UI with zero codegen, zero schema files, and zero build steps. GraphQL's value proposition — flexible queries, client-driven data fetching — matters for public APIs with diverse consumers. For an internal API where we control both sides, it's overhead without payoff.
-
-<Warning>
-tRPC locks you into TypeScript on both ends. If you ever need a mobile client in Swift/Kotlin or a third-party integration, you'll need a separate API layer. We accepted this because our near-term roadmap was web-only. Document assumptions like this — they're the first things that change.
-</Warning>
-
-## The Two-Way Door Framework
-
-Jeff Bezos popularized this concept, and I use it constantly for technical decisions. Every decision falls into one of two categories:
-
-**One-way doors** — Difficult or impossible to reverse. Examples: choosing a primary database, picking a programming language for a large codebase, committing to a cloud provider's proprietary services. These deserve ADRs, thorough analysis, and stakeholder buy-in.
-
-**Two-way doors** — Easy to reverse with low cost. Examples: choosing a CSS-in-JS library, picking a testing framework, selecting a linting configuration. These should be made quickly by the person closest to the work.
-
-The failure mode I see most often: teams treat two-way doors like one-way doors. They spend three weeks debating whether to use Jest or Vitest when the migration cost between them is a half-day of find-and-replace. Meanwhile, they treat one-way doors — like "let's use DynamoDB for everything" — as two-way doors and commit with a 30-minute Slack discussion.
-
-```typescript
-// A simple mental model I use
-type Decision = {
-  reversalCost: 'hours' | 'days' | 'weeks' | 'months';
-  blastRadius: 'single-service' | 'multiple-services' | 'entire-platform';
-  dataImpact: 'none' | 'migration-required' | 'data-loss-risk';
-};
-
-function needsADR(decision: Decision): boolean {
-  return (
-    decision.reversalCost === 'weeks' || decision.reversalCost === 'months' ||
-    decision.blastRadius === 'entire-platform' ||
-    decision.dataImpact === 'data-loss-risk'
-  );
-}
-```
+The table makes the reasoning visible. Anyone reading it later — even someone who joined the team a year from now — can see *what was compared* and *what mattered*. That's the whole point.
 
 ## How to Present Trade-offs to Leadership
 
-Engineers often struggle to communicate technical decisions to non-technical stakeholders. The mistake is leading with technology names. Nobody above you in the org chart cares whether you use Kafka or SQS. They care about cost, timeline, risk, and capability.
+Engineers often struggle to communicate technical decisions upward. The mistake is leading with technology names. Nobody above you in the org chart cares whether you use Kafka or SQS. They care about cost, timeline, risk, and capability.
 
-My format for presenting to leadership:
+| Instead of... | Say... |
+|--------------|--------|
+| "We should use Kafka" | "Option A handles 10,000 tx/min, costs $800/month, 2 weeks to build" |
+| "We need to refactor the auth module" | "Every new feature takes 3x longer because of the auth architecture" |
+| "Let's adopt NestJS" | "This framework enforces patterns that prevent the architecture drift we're seeing as we hire" |
 
-1. **Problem statement in business terms.** "Our payment processing can't scale beyond 500 transactions/minute. We're at 380 and growing 15% monthly."
-2. **Options with business impact.** Not "Option A: Kafka" but "Option A: 2 weeks to build, handles 10,000 tx/min, $800/month infrastructure cost."
-3. **Recommendation with confidence level.** "I recommend Option B with high confidence. The risk is X, and we can mitigate it by Y."
-4. **What you need from them.** "I need approval for 3 sprints of engineering time and a $500/month infrastructure budget increase."
+Frame every technical decision in terms of **time to deliver, cost, risk, and what it unlocks.** Save the technical depth for the ADR document that engineers will reference.
 
 <Tip>
-Frame every technical decision in terms leadership cares about: time to deliver, cost, risk, and what it unlocks. Save the technical depth for the ADR document that engineers will reference.
+Include a confidence level with your recommendation: "I recommend Option B with high confidence. The risk is X, and we can mitigate it by Y." This gives leadership a clear signal and an honest assessment — both of which build trust.
 </Tip>
 
-## When to Revisit Decisions
+## When to Revisit a Decision
 
-An ADR isn't a tombstone — it's a living document. I revisit decisions when:
+An ADR isn't a tombstone — it's a living document. Revisit when:
 
-- **The context changed.** We assumed 100 requests/second; we're now at 1,000. The ADR was made for a different scale.
-- **The team changed.** We assumed a team of 3 senior engineers; we now have 12 mixed-level. What was manageable is now chaotic.
-- **The technology matured.** When we chose tRPC, it was v9 and unstable. Now it's v11 with a robust ecosystem. The "too risky" options from 2 years ago might be safe now.
-- **We hit a predicted consequence.** Every ADR lists negative consequences. When those consequences actually materialize and become painful, it's time to reassess.
+- **The context changed.** You assumed 100 req/s; you're at 1,000. The ADR was for a different scale.
+- **The team changed.** You assumed 3 senior engineers; you now have 12 mixed-level. Complexity tolerance shifted.
+- **The technology matured.** The "too risky" option from 2 years ago might be stable now.
+- **You hit a predicted consequence.** Every ADR lists negative trade-offs. When those become painful, it's time to reassess.
 
-The review date field in the template is a trigger for this. When the date arrives, I scan the ADR and ask: "Are the assumptions still valid? Are the trade-offs still acceptable?" If yes, update the review date and move on. If no, write a new ADR that supersedes the old one.
+When the review date arrives, scan the ADR and ask: "Are the assumptions still valid?" If yes, push the review date out. If no, write a new ADR that supersedes the old one.
 
-## Making It Stick
+## Making ADRs Stick
 
-ADRs only work if the team actually writes them. Here's how I've made them habitual:
+ADRs only work if the team actually writes them:
 
-1. **Store them in the repo**, not in Confluence or Notion. A `docs/adr/` directory that lives with the code. Searchable with `grep`. Reviewed in PRs.
-2. **Make them part of the PR process.** Any PR that introduces a new dependency, changes infrastructure, or alters system architecture should include or reference an ADR.
-3. **Keep them short.** If an ADR takes more than an hour to write, you're over-thinking it or the decision is more complex than you realized (which is itself useful information).
-4. **Reference them in code comments.** When someone asks "why do we do it this way?" in code review, link to the ADR. Over time, the team internalizes that the answer exists in a known location.
+1. **Store them in the repo** — a `docs/adr/` directory, searchable, reviewed in PRs. Not in a wiki that nobody visits.
+2. **Make them part of the PR process** — any PR that introduces a dependency, changes infrastructure, or alters architecture should include or reference an ADR.
+3. **Keep them short** — if it takes more than an hour to write, the decision is more complex than you realized (which is itself useful information).
+4. **Reference them in code review** — when someone asks "why do we do it this way?", link to the ADR. Over time, the team internalizes that answers live in a known location.
 
 The best engineering decisions aren't the ones where you pick the "right" technology. They're the ones where you understand the trade-offs, document them clearly, and give your future self the context to know when the decision should change.

@@ -212,6 +212,10 @@
             ]
           },
           {
+            "group": "Development",
+            "pages": ["ai/development/spec-driven-development"]
+          },
+          {
             "group": "Guides",
             "pages": ["ai/guides/claude-code", "ai/guides/openai-sdk"]
           }

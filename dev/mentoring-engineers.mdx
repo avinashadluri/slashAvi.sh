@@ -3,122 +3,103 @@ title: "Mentoring Without Micromanaging: How I Coach Engineers Into Seniors"
 description: "Frameworks for mentoring mid-level engineers — asking the right questions, creating growth opportunities, and knowing when to step back."
 ---
 
-The best engineering mentor I ever had almost never told me what to do. She asked questions. Relentlessly good questions that made me realize I already knew the answer, or that I hadn't thought hard enough about the problem. It took me years to appreciate how much skill that required and how much restraint it demanded.
+![Team working together on a project](https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&auto=format&fit=crop&q=80)
 
-Now, as a staff engineer who spends a meaningful chunk of my time mentoring, I try to channel that approach. It's harder than it sounds. When you can see the answer clearly and the person across from you is struggling, the temptation to just tell them is almost irresistible. But every time you give someone the answer, you rob them of the learning that comes from finding it themselves.
+The best engineering mentor I ever had almost never told me what to do. She asked questions — relentlessly good questions that made me realize I already knew the answer, or that I had not thought hard enough about the problem. It took me years to appreciate how much skill that required and how much restraint it demanded.
 
-Mentoring is not managing. It's not teaching. It's not pair programming. It's a specific kind of relationship where your job is to accelerate someone's growth by creating the right conditions — then getting out of the way.
+Now, as someone who spends a meaningful chunk of time mentoring, I try to channel that approach. It is harder than it sounds. When you can see the answer clearly and the person across from you is struggling, the temptation to just tell them is almost irresistible. But every time you give someone the answer, you rob them of the learning that comes from finding it themselves.
+
+> "The secret of managing is that almost everything you do comes down to building and maintaining a strong team." — Camille Fournier, *The Manager's Path*
 
 ## Mentoring vs Managing vs Teaching
 
-These get conflated constantly, and the conflation leads to bad mentoring:
+These get conflated constantly, and the conflation leads to bad mentoring.
 
 | | Mentoring | Managing | Teaching |
 |-|-----------|----------|----------|
 | **Goal** | Accelerate growth | Deliver outcomes | Transfer knowledge |
 | **Power dynamic** | Peer-ish, voluntary | Hierarchical, formal | Expert-to-novice |
 | **Primary tool** | Questions | Direction | Explanation |
-| **Time horizon** | Long-term career | Quarter / sprint | Session / topic |
+| **Time horizon** | Long-term career | Quarter or sprint | Session or topic |
 | **Success metric** | Mentee outgrows you | Team hits targets | Student understands concept |
+| **Failure mode** | Creating dependency | Micromanaging | Information dump without retention |
 
-As a staff engineer, I'm often in a fuzzy space where I'm technically not managing anyone but I have real influence over their work and career. That makes the distinction even more important. If I slip into managing mode, I undermine the mentee's autonomy. If I slip into teaching mode, I create dependency rather than growth.
+As a staff engineer, you are often in a fuzzy space where you are technically not managing anyone but you have real influence over their work and career. That makes the distinction critical. If you slip into managing mode, you undermine the mentee's autonomy. If you slip into teaching mode, you create dependency rather than growth.
 
 <Info>
-The best signal that you're mentoring well: the person starts bringing you harder problems. Not because they can't solve them, but because they want a thought partner. If they stop bringing you problems entirely, you either succeeded completely or they don't trust you enough. Figure out which one.
+The best signal that you are mentoring well: the person starts bringing you harder problems. Not because they cannot solve them, but because they want a thought partner. If they stop bringing you problems entirely, you either succeeded completely or they do not trust you enough. Figure out which one.
 </Info>
 
 ## The Coaching Stance: Ask, Don't Tell
 
 The single most impactful shift in my mentoring was learning to default to questions. Not leading questions that steer toward my preferred answer — genuine questions that help the other person think through the problem.
 
-Instead of: "You should use a queue here."
-Try: "What happens if this service goes down while a request is in flight?"
+| Instead of Telling... | Try Asking... |
+|----------------------|---------------|
+| "You should use a queue here." | "What happens if this service goes down while a request is in flight?" |
+| "This API design won't scale." | "How would this behave with 100x the current traffic? Walk me through the request path." |
+| "You need to break this into smaller PRs." | "If you were reviewing this PR, where would you start? How long would it take?" |
+| "Use a caching layer for this." | "Where are the repeated calls happening, and what would change if we could avoid them?" |
 
-Instead of: "This API design won't scale."
-Try: "How would this behave with 100x the current traffic? Walk me through the request path."
-
-Instead of: "You need to break this into smaller PRs."
-Try: "If you were reviewing this PR, where would you start? How long would it take?"
-
-The question approach is slower in the moment and faster in the long run. The engineer who discovers through their own reasoning that they need a queue will internalize that pattern far more deeply than the one who was told to add one.
+The question approach is slower in the moment and faster in the long run. The engineer who discovers through their own reasoning that they need a queue internalizes that pattern far more deeply than the one who was told to add one.
 
 ## Creating Stretch Assignments
 
 Growth happens at the edge of comfort. Not in the panic zone, not in the cruise zone — right at the boundary where something is challenging but achievable with effort.
 
-My framework for stretch assignments:
-
-1. **Identify the growth edge** — what skill does this person need to develop next?
-2. **Find a real problem that exercises that skill** — stretch assignments must be real work, not busywork
-3. **Calibrate the challenge** — too easy and it's not growth; too hard and it's frustration
-4. **Provide safety nets** — make it clear that failure is safe and you're available if they get stuck
-5. **Debrief afterward** — the reflection is where the learning actually crystallizes
-
-At Weel, I had a mid-level engineer who was technically strong but avoided cross-team work. I asked her to lead the API contract discussion between our team and the payments team. She was nervous. The discussion got heated at one point. But she navigated it, proposed a compromise, and got both teams aligned. That experience taught her more about staff-level work than any coding task could have.
+| Step | What to Do | Why It Matters |
+|------|-----------|---------------|
+| **Identify the growth edge** | What skill does this person need to develop next? | Targets the assignment to real development needs |
+| **Find a real problem** | Stretch assignments must be real work, not busywork | Demonstrates trust and gives meaningful stakes |
+| **Calibrate the challenge** | Too easy is not growth; too hard is frustration | The sweet spot builds confidence alongside capability |
+| **Provide safety nets** | Make failure safe; be available if they get stuck | Psychological safety is the foundation of risk-taking |
+| **Debrief afterward** | Reflection is where the learning actually crystallizes | Without the debrief, 80% of the lesson is lost |
 
 <Tip>
-The best stretch assignments are ones where the cost of failure is low but the learning value is high. Design doc reviews, internal tech talks, leading a spike, owning a small migration — these are all great growth vehicles that won't cause a production incident if things go sideways.
+The best stretch assignments are ones where the cost of failure is low but the learning value is high. Design doc reviews, internal tech talks, leading a spike, owning a small migration — these are all great growth vehicles that will not cause a production incident if things go sideways.
 </Tip>
 
-## 1:1 Frameworks That Work
+## The Feedback Formula
 
-I do mentoring 1:1s differently from managerial 1:1s. The mentee owns the agenda. My job is to listen, ask questions, and occasionally offer perspective from my own experience.
+Bad feedback is vague ("you need to be more senior"), untimely (three months after the event), or delivered without context. Good feedback is specific, timely, and framed as observation plus impact.
 
-My structure:
+**The formula: "When you [specific behavior], [specific impact]. What was your thinking there?"**
 
-- **First 5 minutes: check-in.** How are you doing? Not "what's your status" — genuinely, how are you doing. Context about someone's state of mind changes how I engage for the rest of the conversation.
-- **Middle 20 minutes: their topics.** Whatever they want to discuss — technical problems, career questions, team dynamics, something they read, a decision they're wrestling with. I follow their lead.
-- **Last 5 minutes: reflection.** What's one thing you're going to do differently this week? Not an assignment — a commitment they make to themselves.
+This format does three things. It is specific enough to be actionable. It connects behavior to impact so the person understands why it matters. And it ends with a question that opens dialogue rather than shutting it down.
 
-I keep lightweight notes after each 1:1 — just the key themes and any commitments. This lets me notice patterns over time. If someone has mentioned feeling undervalued three times in a row, that's not a random topic — that's a signal.
-
-## Giving Feedback That Lands
-
-Bad feedback is vague ("you need to be more senior"), untimely (three months after the event), or delivered without context. Good feedback is specific, timely, and framed as observation + impact.
-
-The formula I use:
-
-**"When you [specific behavior], [specific impact]. What was your thinking there?"**
-
-"When you merged that PR without addressing the API versioning comment, it meant the mobile team had to do a breaking change migration. What was your thinking there?"
-
-This format does three things: it's specific enough to be actionable, it connects behavior to impact so the person understands why it matters, and it ends with a question that opens dialogue rather than shutting it down.
+| Feedback Element | Example |
+|-----------------|---------|
+| **Specific behavior** | "When you merged that PR without addressing the API versioning comment..." |
+| **Specific impact** | "...it meant the mobile team had to do a breaking change migration." |
+| **Open question** | "What was your thinking there?" |
 
 <Warning>
-Feedback in public is almost always a mistake, even when it's positive. Public praise can embarrass introverts and create weird dynamics. Public criticism is obviously destructive. Default to private, always.
+Feedback in public is almost always a mistake, even when it is positive. Public praise can embarrass introverts and create awkward dynamics. Public criticism is obviously destructive. Default to private, always.
 </Warning>
+
+## The Mentoring Toolkit
+
+Here is a practical reference for common situations you will encounter:
+
+| Situation | Approach | Example |
+|-----------|----------|---------|
+| Mentee is stuck on a technical problem | Ask diagnostic questions — do not debug for them | "What have you tried? What did you expect vs what happened?" |
+| Mentee is avoiding a hard conversation | Role-play the conversation, help them prepare | "Let's practice — I'll play the tech lead, pitch me your approach." |
+| Mentee underestimates their work | Help them articulate impact in concrete terms | "Let's write down what changed because of what you built." |
+| Mentee is frustrated with lack of promotion | Clarify expectations, identify gaps honestly | "Let's map your work against the staff rubric together." |
+| Mentee is overcommitted | Help them prioritize and practice saying no | "If you could only do two of these five things, which two?" |
+| Mentee disagrees with a team decision | Validate the disagreement, explore the context | "You might be right. What do you think the decision-maker was optimizing for?" |
 
 ## Delegate the Problem, Not the Solution
 
 This is the principle I come back to most often. When a mid-level engineer asks me how to solve something, my instinct is to hand them a solution. But the far better approach is to hand them the problem and let them find the solution.
 
-"We need to reduce the p99 latency of the search endpoint from 800ms to under 200ms" is a problem. "Add a Redis cache in front of the database query with a 5-minute TTL" is a solution. The first framing gives the engineer space to investigate, learn, and potentially find a better approach than the one I had in mind.
-
-At Atlassian, I delegated the problem of improving build times to a mid-level engineer. My mental solution was caching. She investigated and discovered that the real bottleneck was unnecessary test parallelization configuration, not missing caches. Her solution was simpler, cheaper, and better than mine would have been. That only happened because I gave her the problem, not my answer.
-
-## The Mentoring Toolkit
-
-Here's a practical reference for common mentoring situations:
-
-| Situation | Approach | Example |
-|-----------|----------|---------|
-| Mentee is stuck on a technical problem | Ask diagnostic questions, don't debug for them | "What have you tried? What did you expect vs what happened?" |
-| Mentee is avoiding a hard conversation | Role-play the conversation, help them prepare | "Let's practice — I'll be the tech lead, pitch me your approach" |
-| Mentee underestimates their work | Help them articulate impact in concrete terms | "Let's write down what changed because of what you built" |
-| Mentee is frustrated with lack of promotion | Clarify expectations, identify gaps honestly | "Let's map your work against the staff rubric together" |
-| Mentee is overcommitted | Help them prioritize and practice saying no | "If you could only do two of these five things, which two?" |
-| Mentee disagrees with a team decision | Validate the disagreement, explore the context | "You might be right. What do you think the decision-maker was optimizing for?" |
-
-## Recognizing Different Growth Paths
-
-Not every engineer wants to be a staff engineer, and that's completely fine. Some engineers thrive going deep — becoming the world's foremost expert on a specific domain. Others thrive going broad — becoming the connective tissue between systems and teams. Both paths are valid, both are valuable, and forcing someone down the wrong path is a mentoring failure.
-
-My job as a mentor is to help someone figure out which path energizes them, then help them walk it. If a brilliant systems engineer wants to go deep on database internals and never think about org strategy, my job is to help them become the best database engineer they can be — not to push them toward staff-level breadth they don't want.
+"We need to reduce the p99 latency of the search endpoint from 800ms to under 200ms" is a problem. "Add a Redis cache with a 5-minute TTL" is a solution. The first framing gives the engineer space to investigate, learn, and potentially find a better approach than the one you had in mind. A team I worked with proved this when I delegated a build-time problem expecting a caching solution — the engineer discovered the real bottleneck was a misconfigured test parallelization setup. Her solution was simpler, cheaper, and better than mine would have been.
 
 ## When to Push vs When to Support
 
 Knowing when to push and when to support is the hardest judgment call in mentoring. Push too hard and you break trust. Support too much and you enable stagnation.
 
-My heuristic: push when someone is avoiding growth out of fear, support when someone is processing a genuine setback. The difference is usually visible in how they talk about it. Fear sounds like "I don't think I'm ready" (push). Setback sounds like "I tried and it didn't work" (support).
+A useful heuristic: push when someone is avoiding growth out of fear, support when someone is processing a genuine setback. Fear sounds like "I don't think I'm ready." That is a push moment. Setback sounds like "I tried and it didn't work." That is a support moment.
 
-At the end of the day, mentoring is an act of optimism. You're investing time and energy in someone's future capability. The returns are uncertain and delayed. But every senior engineer I've helped grow has made the teams around them better, and those teams have built better systems, and those systems have served users better. That's the compounding return of good mentoring — it doesn't stop with the person you're mentoring.
+At the end of the day, mentoring is an act of optimism. You are investing time and energy in someone's future capability. The returns are uncertain and delayed. But every senior engineer who grows makes the teams around them better, those teams build better systems, and those systems serve users better. That is the compounding return of good mentoring — it does not stop with the person you are mentoring.

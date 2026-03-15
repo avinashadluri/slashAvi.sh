@@ -1,243 +1,121 @@
 ---
-title: "From Figma Variables to Production CSS: The Pipeline We Built at Weel"
+title: "From Figma Variables to Production CSS: The Pipeline That Keeps Design and Code in Sync"
 description: "The end-to-end design token pipeline — Figma variables, Style Dictionary, CI/CD, and automated visual testing that keeps design and engineering in sync."
 ---
 
-> _The gap between what a designer intends and what ships to production is where design systems go to die. We built a pipeline to close that gap._
+![A creative workspace with design tools and color swatches](https://images.unsplash.com/photo-1558655146-9f40138edfeb?w=800&auto=format&fit=crop&q=80)
 
-Every design system I've worked on has had the same problem: designers update a color in Figma, then someone manually updates the CSS, then someone else notices the button component didn't get the memo, and three weeks later a PM files a bug that says "the blue is wrong."
+Every design system has the same problem: a designer updates a colour in Figma, someone manually updates the CSS, someone else notices the button component didn't get the memo, and three weeks later a PM files a bug that says "the blue is wrong." The gap between what a designer intends and what ships to production is where design systems quietly fall apart.
 
-At Weel, we decided to fix this permanently. Here's the pipeline we built.
+The fix isn't more process or more Slack reminders. It's a pipeline — an automated flow from Figma variables through a token transformation layer into production CSS and TypeScript, validated by visual testing in CI. Once it's built, design-engineering drift becomes nearly impossible.
 
----
+> _"Automation is not about replacing people. It's about amplifying their intent."_ — Jina Anne
 
-## The Problem: Design-Engineering Drift
+## The Design-Engineering Drift Problem
 
-Design-engineering drift is what happens when:
+Design-engineering drift is what happens when Figma and code have no shared source of truth. Everything is manually synchronized, which means everything eventually diverges.
 
 | Symptom | Root Cause |
-|---|---|
-| Colors in Figma don't match production | Manual handoff, no single source of truth |
+|---------|-----------|
+| Colours in Figma don't match production | Manual handoff with no single source of truth |
 | Spacing is "close but not quite" | Designers and engineers eyeball values independently |
-| Dark mode has inconsistencies | Token mappings aren't automated |
-| Rebrands take months | Tokens are scattered across stylesheets |
-| "It looks different on staging" | No visual regression testing in CI |
+| Dark mode has inconsistencies | Token mappings between themes aren't automated |
+| Rebrands take months instead of days | Tokens are scattered across dozens of stylesheets |
+| "It looks different on staging" | No visual regression testing in the CI pipeline |
 
-The underlying issue is always the same: **Figma and code have no shared source of truth.** Everything is manually synchronized, which means everything eventually drifts.
+The underlying issue is always the same: **two sources of truth that are manually kept in sync.** Manual sync is a polite way of saying "they'll drift, and nobody will notice until a customer complains."
 
----
+<Warning>
+Don't build this pipeline until your design system has real adoption. If nobody uses the components, automating the tokens is optimising the wrong thing. Fix adoption first — then automate the plumbing.
+</Warning>
 
-## The Architecture
+## The Pipeline Stages
 
-Our pipeline has four stages:
+The token pipeline has four stages, each building on the previous one. Think of it as a supply chain from design intent to production pixels.
 
-```
-Figma Variables → Token Export → Style Dictionary → Production CSS/TS
-     ↓                ↓               ↓                    ↓
-  (source)     (Figma API)    (transform)         (consume)
-                                   ↓
-                            Visual Testing
-                            (Chromatic CI)
-```
+| Stage | Input | Output | Who Owns It | Key Tool |
+|-------|-------|--------|-------------|----------|
+| **1. Source of Truth** | Design decisions (colours, spacing, typography, radii) | Figma Variables organized in primitive → semantic → component layers | Designers | Figma Variables |
+| **2. Token Export** | Figma Variables API response | Structured JSON files in Style Dictionary format | Automated (CI) | GitHub Action + Figma API |
+| **3. Transformation** | Raw token JSON | Platform-specific outputs — CSS custom properties, TypeScript constants, mobile values | Automated (CI) | Style Dictionary |
+| **4. Consumption + Validation** | CSS/TS token files | Components using tokens, validated by visual regression testing on every PR | Engineers + CI | Chromatic / Playwright |
 
-### Stage 1: Figma Variables as the Source of Truth
-
-We moved all design decisions into Figma's native variables system:
-
-- **Primitive tokens**: Raw values (`blue-500: #3B82F6`, `space-4: 16px`)
-- **Semantic tokens**: Contextual mappings (`color-primary: {blue-500}`, `spacing-md: {space-4}`)
-- **Component tokens**: Component-specific (`button-bg: {color-primary}`, `button-padding: {spacing-md}`)
-
-The layering matters. When we rebranded, we changed 12 primitive tokens and the entire UI updated. No component changes needed.
+The layering within Figma Variables matters enormously. **Primitive tokens** are raw values (`blue-500: #3B82F6`). **Semantic tokens** are contextual mappings (`color-primary: {blue-500}`). **Component tokens** are specific (`button-bg: {color-primary}`). This layering is what makes a rebrand possible in hours instead of months — you change 12 primitive tokens and the entire UI updates.
 
 <Tip>
-Start with semantic tokens, not primitives. Engineers should never reference `blue-500` in code — they should reference `color-primary`. This indirection is what makes rebrands possible.
+Start with semantic tokens, not primitives. Engineers should never reference `blue-500` in code — they should reference `color-primary`. This indirection is what makes rebrands, white-labelling, and theme switching possible without touching component code.
 </Tip>
 
-### Stage 2: Token Export via Figma API
+## Figma Variables to Style Dictionary to CSS/TS
 
-We use a GitHub Action that runs on a schedule (daily) and on-demand:
+The middle of the pipeline is where the magic happens. Here's how the three layers connect conceptually.
 
-```yaml
-name: Sync Design Tokens
-on:
-  schedule:
-    - cron: '0 9 * * 1-5'
-  workflow_dispatch:
+**Step 1: Figma Variables as the source of truth.** All design decisions live in Figma's native variables system. Designers work there. The API exposes them programmatically.
 
-jobs:
-  sync-tokens:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+**Step 2: A scheduled CI job fetches tokens.** A GitHub Action runs daily (and on-demand) to call the Figma Variables API, transform the response into Style Dictionary's JSON input format, and open a PR if anything changed. This is the bridge between design and engineering — automated, auditable, and version-controlled.
 
-      - name: Fetch Figma Variables
-        run: |
-          node scripts/fetch-figma-tokens.js
-        env:
-          FIGMA_ACCESS_TOKEN: ${{ secrets.FIGMA_ACCESS_TOKEN }}
-          FIGMA_FILE_KEY: ${{ secrets.FIGMA_FILE_KEY }}
-
-      - name: Transform with Style Dictionary
-        run: npx style-dictionary build
-
-      - name: Create PR if changed
-        uses: peter-evans/create-pull-request@v5
-        with:
-          title: "chore: sync design tokens from Figma"
-          branch: design-token-sync
-          commit-message: "chore: sync design tokens"
-```
-
-The fetch script calls the Figma Variables API and transforms the response into Style Dictionary's input format:
-
-```typescript
-interface TokenFile {
-  color: {
-    primary: { value: string; type: "color" };
-    secondary: { value: string; type: "color" };
-    // ...
-  };
-  spacing: {
-    xs: { value: string; type: "dimension" };
-    sm: { value: string; type: "dimension" };
-    // ...
-  };
-}
-```
-
-### Stage 3: Style Dictionary Transform
-
-Style Dictionary takes the raw token JSON and generates platform-specific outputs:
+**Step 3: Style Dictionary transforms tokens.** It takes the raw JSON and generates platform-specific outputs. One config file produces CSS custom properties for the web, TypeScript constants for type-safe access, and could produce Swift/Kotlin values for mobile.
 
 ```javascript
-// style-dictionary.config.js
+// style-dictionary.config.js — one config, multiple platform outputs
 module.exports = {
-  source: ["tokens/**/*.json"],
+  source: ['tokens/**/*.json'],
   platforms: {
     css: {
-      transformGroup: "css",
-      buildPath: "packages/tokens/css/",
-      files: [
-        {
-          destination: "variables.css",
-          format: "css/variables",
-          options: { outputReferences: true },
-        },
-      ],
+      transformGroup: 'css',
+      buildPath: 'packages/tokens/css/',
+      files: [{ destination: 'variables.css', format: 'css/variables' }],
     },
     typescript: {
-      transformGroup: "js",
-      buildPath: "packages/tokens/ts/",
-      files: [
-        {
-          destination: "tokens.ts",
-          format: "javascript/es6",
-        },
-      ],
+      transformGroup: 'js',
+      buildPath: 'packages/tokens/ts/',
+      files: [{ destination: 'tokens.ts', format: 'javascript/es6' }],
     },
   },
 };
 ```
 
-This generates:
+The output is clean, predictable, and version-controlled. CSS gets `:root` variables. TypeScript gets typed constants. Dark mode gets a `[data-theme="dark"]` override block generated from the same source tokens. No manual mapping. No drift.
 
-```css
-/* packages/tokens/css/variables.css */
-:root {
-  --color-primary: #3B82F6;
-  --color-secondary: #6366F1;
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-}
+## Dark Mode and Theme Tokens
 
-[data-theme="dark"] {
-  --color-primary: #60A5FA;
-  --color-secondary: #818CF8;
-}
-```
+The real power of the pipeline shows with dark mode. Instead of maintaining separate stylesheets, the semantic token layer handles everything through variable reassignment.
 
-```typescript
-// packages/tokens/ts/tokens.ts
-export const ColorPrimary = "#3B82F6";
-export const ColorSecondary = "#6366F1";
-export const SpacingXs = "4px";
-export const SpacingSm = "8px";
-export const SpacingMd = "16px";
-```
-
-### Stage 4: Consumption and Visual Testing
-
-Components consume tokens via CSS variables:
-
-```tsx
-function Button({ children, variant = "primary" }: ButtonProps) {
-  return (
-    <button
-      className={cn(
-        "px-[var(--spacing-md)] py-[var(--spacing-sm)]",
-        "rounded-[var(--radius-md)]",
-        "font-medium transition-colors",
-        variant === "primary" && "bg-[var(--color-primary)] text-white",
-        variant === "secondary" && "bg-[var(--color-secondary)] text-white"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-```
-
-Every token sync PR triggers Chromatic visual testing on all Storybook stories. If a token change causes unexpected visual changes, the PR gets flagged for review.
-
----
-
-## Dark Mode and Responsive Tokens
-
-The real power shows with dark mode. We don't maintain separate dark mode stylesheets — the semantic token layer handles it:
-
-| Semantic Token | Light | Dark |
-|---|---|---|
+| Semantic Token | Light Value | Dark Value |
+|---------------|------------|------------|
 | `color-bg-primary` | `white` | `gray-900` |
 | `color-text-primary` | `gray-900` | `gray-50` |
 | `color-border-default` | `gray-200` | `gray-700` |
 | `color-surface-raised` | `white` | `gray-800` |
 
-When the `data-theme` attribute changes, every component updates automatically. Zero component-level dark mode logic.
+When the `data-theme` attribute changes on the root element, every component updates automatically. Zero component-level dark mode logic. Zero conditional class names for themes. The indirection that seemed unnecessary when you had one theme becomes essential the moment you have two.
 
----
+## Results Metrics
+
+The pipeline is an investment. Here's what the return looks like.
+
+| Metric | Before Pipeline | After Pipeline |
+|--------|----------------|----------------|
+| **Token sync time** | 1–2 weeks (manual, error-prone) | Same day (automated, auditable) |
+| **Dark mode bugs per quarter** | ~12–15 | ~2–3 |
+| **Rebrand effort** | Estimated 6–8 weeks | 1–2 days |
+| **Visual regressions caught in CI** | 0 (caught by users) | ~10–15 per month (caught before merge) |
+| **Design-engineering alignment meetings** | Weekly, 1 hour | Bi-weekly, 30 minutes |
+
+The alignment meeting reduction is an underrated win. When the pipeline ensures tokens are always in sync, the meetings shift from "why does this look wrong" to "what should we build next." That's a cultural shift as much as a technical one.
 
 ## The Cultural Shift
 
-The hardest part wasn't technical — it was cultural:
+The hardest part of this pipeline isn't technical — it's cultural. Three groups of people need to change how they work.
 
-- **Designers had to commit to the variable system.** No more one-off hex codes in Figma. Everything goes through variables.
-- **Engineers had to trust the pipeline.** No more "I'll just hardcode this for now."
-- **PMs had to accept the upfront investment.** The pipeline took three sprints to build. The payoff was a rebrand that took two days instead of two months.
-
-<Warning>
-Don't build this pipeline until your design system has real adoption. If nobody uses the components, automating the tokens is optimizing the wrong thing. Fix adoption first (see [Why 80% of Design Systems Get Abandoned](/dev/design-system-adoption)).
-</Warning>
-
----
-
-## Results After 6 Months
-
-| Metric | Before | After |
-|---|---|---|
-| Token sync time | 1-2 weeks (manual) | Same day (automated) |
-| Dark mode bugs | ~15/quarter | ~2/quarter |
-| Rebrand effort | Estimated 8 weeks | 2 days |
-| Visual regressions caught in CI | 0 | ~12/month |
-| Designer-engineer alignment meetings | Weekly, 1 hour | Bi-weekly, 30 min |
+| Role | Old Habit | New Discipline |
+|------|----------|---------------|
+| **Designers** | One-off hex codes in Figma, styles not connected to variables | Everything goes through the variable system — no exceptions |
+| **Engineers** | "I'll just hardcode this colour for now" | Trust the pipeline. Use tokens. If a token doesn't exist, request it. |
+| **Product managers** | Push for speed over process | Accept the upfront investment. The payoff is a rebrand in days, not months. |
 
 <Info>
-The pipeline isn't perfect. Figma's Variables API is still evolving, and complex token relationships (like responsive spacing scales) require custom transforms. But even at 80% automation, the time savings are massive compared to manual synchronization.
+The Figma Variables API is still evolving, and complex token relationships (like responsive spacing scales) require custom Style Dictionary transforms. Even at 80% automation, the time savings are massive compared to manual synchronisation. Perfect is the enemy of shipped.
 </Info>
 
----
-
-_Design tokens aren't glamorous. Nobody tweets about them. But they're the plumbing that makes a design system actually work — and plumbing that works is the best kind._
+Design tokens aren't glamorous. Nobody tweets about them. But they're the plumbing that makes a design system actually work — and plumbing that works is the best kind.

@@ -3,164 +3,94 @@ title: "Technical Strategy Documents That Executives Actually Read"
 description: "RFCs, one-pagers, strategy decks — how to write technical documents that influence decisions at the leadership level."
 ---
 
-I've written hundreds of technical documents over the years. RFCs, architecture decision records, strategy docs, one-pagers, post-mortems. Most of them were fine. Some of them changed the direction of entire product lines. And a shameful number of them were completely ignored.
+![Presenting a strategy to leadership](https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800&auto=format&fit=crop&q=80)
 
-The difference between a document that gathers dust and one that moves an organization is almost never the technical content. It's the framing. Engineers write for engineers — we default to thoroughness, precision, and technical depth. But the people making funding and priority decisions are directors, VPs, and C-suite leaders who haven't had time to read past the first page.
+I have written hundreds of technical documents over the years — RFCs, architecture decision records, strategy docs, one-pagers, post-mortems. Most of them were fine. Some of them changed the direction of entire product lines. And a shameful number of them were completely ignored.
 
-This isn't their failure. It's ours. If we want technical decisions to be informed by technical reality, we need to meet decision-makers where they are.
+The difference between a document that gathers dust and one that moves an organization is almost never the technical content. It is the framing. Engineers write for engineers — we default to thoroughness, precision, and technical depth. But the people making funding and priority decisions are directors, VPs, and C-suite leaders who have not had time to read past the first page. If we want technical decisions to be informed by technical reality, we need to meet decision-makers where they are.
+
+> "Being a senior engineer is not just about solving hard technical problems. It's about making sure the right problems get solved." — Tanya Reilly, *The Staff Engineer's Path*
 
 ## Why Most Technical Documents Fail
 
-I see the same failure patterns over and over:
+The same failure patterns appear again and again:
 
-**Too long.** A 15-page RFC when a 2-page one-pager would do. Length is not rigor — it's a signal that you haven't distilled your thinking.
-
-**Too technical.** Deep-diving into implementation details before establishing why anyone should care. Your VP doesn't need to understand the Redis eviction policy — they need to understand that the current approach will cause customer-facing outages within six months.
-
-**No business context.** The most common sin. A technically brilliant proposal with zero connection to what the company is trying to achieve. If you can't connect your technical recommendation to revenue, customer experience, risk reduction, or velocity, it won't survive a priority discussion.
-
-**No clear recommendation.** Presenting three options with equal weight and asking leadership to choose. That's abdicating your job. You're the technical expert — make a recommendation and defend it.
+| Failure Pattern | What It Looks Like | Why It Kills Your Document |
+|-----------------|--------------------|-----------------------------|
+| **Too long** | 15-page RFC when a 2-page one-pager would do | Length signals you have not distilled your thinking. Readers give up. |
+| **Too technical** | Deep implementation details before establishing stakes | Your VP does not need the Redis eviction policy — they need to know it will cause outages in six months. |
+| **No business context** | Brilliant proposal with zero connection to company goals | If you cannot tie your recommendation to revenue, customer experience, or risk, it will not survive a priority discussion. |
+| **No clear recommendation** | Three options presented with equal weight | That is abdicating your job. You are the technical expert — make a call and defend it. |
 
 <Warning>
-If your document requires more than 15 minutes to read and understand the core argument, it's too long for a leadership audience. Write the short version first, then attach the long version as an appendix for engineers who want depth.
+If your document requires more than 15 minutes to read and understand the core argument, it is too long for a leadership audience. Write the short version first. Attach the long version as an appendix for engineers who want depth.
 </Warning>
 
 ## The One-Pager Format
 
 This is the format I reach for most often. It works for proposals, architecture changes, technology adoption decisions, and migration plans. The discipline of fitting onto one page forces you to prioritize ruthlessly.
 
-```markdown
-## [Title]: One-Pager
-
-### Problem
-What's broken, at risk, or missing? State it in business terms.
-Include data: incident frequency, customer complaints, developer hours wasted.
-2-3 sentences maximum.
-
-### Context
-Why now? What changed that makes this problem urgent?
-What happens if we do nothing? (This is your "burning platform.")
-2-3 sentences maximum.
-
-### Options Considered
-| Option | Pros | Cons | Effort | Risk |
-|--------|------|------|--------|------|
-| A: [name] | ... | ... | S/M/L | Low/Med/High |
-| B: [name] | ... | ... | S/M/L | Low/Med/High |
-| C: Do nothing | No cost | [consequences] | — | [risk level] |
-
-### Recommendation
-Option [X] because [1-2 sentence justification tied to business outcomes].
-
-### What We Need
-Specific ask: budget, headcount, priority slot, timeline, decision by [date].
-```
+| Section | Purpose | Length |
+|---------|---------|--------|
+| **Problem** | What is broken, at risk, or missing — stated in business terms with data (incident frequency, customer complaints, developer hours wasted) | 2-3 sentences |
+| **Context** | Why now? What changed? What happens if we do nothing? This is your "burning platform." | 2-3 sentences |
+| **Options Considered** | A comparison table of options including pros, cons, effort (S/M/L), and risk (Low/Med/High). Always include "Do nothing" as an explicit option. | Table format |
+| **Recommendation** | Your pick and a 1-2 sentence justification tied to business outcomes | 1-2 sentences |
+| **What We Need** | The specific ask — budget, headcount, priority slot, timeline, decision-by date | 1-2 sentences |
 
 The key insight is including "do nothing" as an explicit option. It forces you to articulate the cost of inaction, which is often the most compelling part of your argument.
 
 <Tip>
-Write the "Recommendation" section first. If you can't state your recommendation clearly in two sentences, you're not ready to write the document. Everything else exists to support that recommendation.
+Write the "Recommendation" section first. If you cannot state your recommendation clearly in two sentences, you are not ready to write the document. Everything else exists to support that recommendation.
 </Tip>
-
-## RFC Structure That Actually Works
-
-For more technical decisions that need engineering buy-in, I use a longer-form RFC. But even here, structure matters more than volume.
-
-```markdown
-## RFC: [Title]
-
-**Author:** [name]
-**Status:** Draft | In Review | Accepted | Deprecated
-**Reviewers:** [names — be specific]
-**Decision deadline:** [date — creates urgency]
-
-### Summary (≤5 sentences)
-What are we proposing and why? A busy engineer should be able to read
-this section alone and understand the proposal.
-
-### Motivation
-What problem does this solve? Who is affected?
-Include metrics where possible.
-
-### Detailed Design
-The technical meat. Diagrams, API contracts, data models.
-This section can be long — it's for engineers.
-
-### Alternatives Considered
-What else did you evaluate? Why did you reject it?
-This section builds trust — it shows you did the homework.
-
-### Migration Plan
-How do we get from here to there without breaking things?
-Include rollback strategy.
-
-### Risks and Open Questions
-What could go wrong? What don't you know yet?
-Explicitly listing risks builds credibility.
-
-### Success Metrics
-How will we know this worked?
-Define measurable outcomes before you start building.
-```
-
-At Atlassian, I learned that the "Alternatives Considered" section is the single most important section after the summary. When leadership asks "did you consider X?" and the answer is already in the document, your credibility skyrockets. When the answer is "no, we didn't think about that," the entire proposal loses momentum.
 
 ## Writing for Different Audiences
 
-The same technical decision needs different framing for different audiences. I think of it as translation, not dumbing down.
+The same technical decision needs different framing for different people. Think of it as translation, not dumbing down.
 
 | Audience | They Care About | Document Style | Detail Level |
 |----------|----------------|---------------|-------------|
-| Engineers | How it works, trade-offs, migration path | RFC, ADR | High — show the design |
-| Engineering Managers | Timeline, team impact, hiring needs | One-pager with staffing section | Medium — focus on execution |
-| Directors | Portfolio fit, cross-team dependencies, risk | One-pager with org context | Low-medium — focus on strategy |
-| VPs / C-suite | Business impact, investment required, competitive position | Executive summary + appendix | Low — focus on outcomes |
+| **Engineers** | How it works, trade-offs, migration path | RFC or ADR | High — show the design |
+| **Engineering Managers** | Timeline, team impact, hiring needs | One-pager with staffing section | Medium — focus on execution |
+| **Directors** | Portfolio fit, cross-team dependencies, risk | One-pager with org context | Low-medium — focus on strategy |
+| **VPs and C-suite** | Business impact, investment required, competitive position | Executive summary plus appendix | Low — focus on outcomes |
 
-I typically write the detailed RFC first (for engineers), then extract the one-pager (for managers and directors), then distill the executive summary (for VPs). Each layer is a lossy compression of the one below it.
+I typically write the detailed RFC first for engineers, extract the one-pager for managers and directors, then distill the executive summary for senior leadership. Each layer is a lossy compression of the one below it.
 
 <Info>
-At Weel, with a 30-person engineering team, one document often served all audiences because the CTO would read the full RFC. At Atlassian, with thousands of engineers, I routinely wrote three versions of the same proposal. Scale changes communication requirements dramatically.
+In a small engineering team, one document often serves all audiences because the CTO reads the full RFC. In a large organization with hundreds of engineers, you routinely write three versions of the same proposal. Scale changes communication requirements dramatically.
 </Info>
 
 ## The "So What?" Test
 
-Before I send any document, I read every section and ask: "So what?" If I can't answer that question in terms the reader cares about, the section needs rewriting or cutting.
+Before sending any document, read every section and ask: "So what?" If you cannot answer that question in terms the reader cares about, the section needs rewriting or cutting.
 
-"We should migrate from REST to GraphQL." So what?
+| Version | Reaction |
+|---------|----------|
+| "We should migrate from REST to GraphQL." | Leadership asks "Why should I care?" and moves to the next agenda item. |
+| "Migrating to GraphQL would reduce mobile app data transfer by 60%, improving load times for our fastest-growing market segment and reducing CDN costs by approximately $40K per year." | Leadership leans forward and asks about the timeline. |
 
-"Migrating to GraphQL would reduce mobile app data transfer by 60%, improving load times for users on slow connections — our fastest-growing market segment — and reducing our CDN costs by approximately $40K/year."
-
-Same technical recommendation. Completely different impact. The second version survives a leadership review. The first one gets deprioritized.
+Same technical recommendation. Completely different impact. The second version survives a priority review. The first gets deprioritized.
 
 ## Visual Communication
 
-Engineers underuse visual communication. A well-designed diagram can convey in 30 seconds what takes 3 paragraphs to explain in text.
+Engineers underuse visual communication. A well-designed diagram conveys in 30 seconds what takes three paragraphs to explain in text.
 
-My toolkit:
-
-- **Architecture diagrams** — show system boundaries, data flow, and the specific components being changed (highlight the delta, not the whole system)
-- **Before/after comparisons** — side-by-side visuals of current state vs proposed state
-- **Timeline diagrams** — for migrations, show phases with clear milestones and rollback points
-- **Dependency graphs** — when the argument is "this is too coupled," show it visually
-
-I use Mermaid diagrams in documents for version-controlled visuals, and Excalidraw for quick sketches in early-stage discussions.
+| Visual Type | When to Use It |
+|-------------|---------------|
+| **Architecture diagram** | Show system boundaries, data flow, and the specific components being changed — highlight the delta, not the whole system |
+| **Before/after comparison** | Side-by-side of current state vs proposed state for immediate visual clarity |
+| **Timeline diagram** | For migrations — show phases with clear milestones and rollback points |
+| **Dependency graph** | When the argument is "this is too coupled," show it visually instead of explaining it in prose |
 
 <Tip>
-Put your most important diagram within the first half-page of the document. Busy readers scan visually before they read text. A clear architecture diagram at the top can hook a reader who would otherwise skim past your carefully written paragraphs.
+Put your most important diagram within the first half-page of the document. Busy readers scan visually before they read text. A clear architecture diagram at the top hooks a reader who would otherwise skim past your carefully written paragraphs.
 </Tip>
 
-## Documents That Changed Direction
+## The Principle Underneath All Formats
 
-The most impactful document I ever wrote was a one-pager at Atlassian arguing that we should not build a feature. Leadership had already aligned on building it. A team was being staffed. I wrote a one-page analysis showing that the feature overlapped with an existing capability in another product, would fragment the user experience, and could be achieved with a smaller investment in the existing platform.
+Templates are starting points, not straitjackets. A crisis response document has different needs than a long-term strategy proposal. A proposal for a technical audience can go deeper than one aimed at a business audience.
 
-It wasn't a popular document. But because I had data, a clear alternative, and the trust of the people in the room, it shifted the decision. That one page saved roughly six months of engineering effort.
-
-The document that taught me the most about failure was an RFC I wrote early in my career at Atlassian — 22 pages of exhaustive technical analysis proposing a new service architecture. It was technically thorough and completely useless. Nobody read past page four. The proposal died not because it was wrong, but because I'd made it impossible for anyone to engage with it.
-
-## Templates Are Starting Points, Not Straitjackets
-
-I've shared formats above, but the real skill is knowing when to deviate. A crisis response document has different needs than a long-term strategy proposal. A proposal to a technical audience can go deeper than one aimed at a business audience. A startup one-pager can be more informal than an enterprise one.
-
-The principle underneath all the formats is the same: **start with why it matters, make a clear recommendation, anticipate objections, and make the next step obvious.** If your document does those four things — regardless of format — it will get read, and it will influence decisions.
+The principle underneath every format is the same: start with why it matters, make a clear recommendation, anticipate objections, and make the next step obvious. If your document does those four things — regardless of format — it will get read, and it will influence decisions.
 
 Every technical document is ultimately a persuasion exercise. The sooner you internalize that, the sooner your technical expertise starts shaping organizational direction rather than living only in your codebase.

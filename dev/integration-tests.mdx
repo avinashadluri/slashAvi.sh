@@ -3,265 +3,110 @@ title: "Integration Tests Are the Only Tests That Matter — Fight Me"
 description: "Why I write more integration tests than unit tests, and the patterns that make them fast, reliable, and worth the investment."
 ---
 
+![Code on a laptop screen with a dark background](https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800&auto=format&fit=crop&q=80)
 
-I have a controversial testing opinion: most unit tests are a waste of time. Not all of them — pure functions, complex algorithms, data transformations, absolutely write unit tests for those. But for the vast majority of application code — API handlers, React components, database queries — unit tests test the wrong thing. They test implementation details. They test mocks. They test that your code calls other code. They don't test that your software works.
+Here's a controversial take: most unit tests are a waste of time. Not the ones for pure functions or complex algorithms — keep those. But for the vast majority of application code — API handlers, React components, database queries — unit tests test the wrong thing. They test mocks. They test that your code calls other code in the right order. They don't test that your software actually works.
 
-Integration tests do. An integration test for an API endpoint sends a real HTTP request, hits a real database, runs real middleware, and asserts on the real response. When that test passes, you know the endpoint works. When a unit test with five mocks passes, you know the handler called the right mock with the right arguments — which tells you almost nothing about production behaviour.
+An integration test for an API endpoint sends a real HTTP request, hits a real database, runs real middleware, and asserts on the real response. When it passes, you *know* the endpoint works. When a unit test with five mocks passes, you know the handler called the right mock with the right arguments — which tells you almost nothing about what happens in production.
 
-At Weel, 60% of our test suite is integration tests. Our bug escape rate dropped 3x when we made that shift. Here's how we do it.
+> _"The more your tests resemble the way your software is used, the more confidence they can give you."_ — Kent C. Dodds
 
-## The Case Against Unit Test Obsession
+## The Case Against Mock-Heavy Unit Tests
 
-Consider a typical API handler tested with unit tests:
+Think about what happens when you unit test a typical API handler. The handler calls a validation library, a user service, a payment service, and a notification service. To isolate the handler, you mock all four. Now you have 15 lines of mock setup for 3 lines of actual logic.
 
-```typescript
-// The handler
-async function createPayment(req: Request, res: Response) {
-  const validated = paymentSchema.parse(req.body);
-  const user = await userService.findById(req.userId);
-  const payment = await paymentService.create(validated, user);
-  await notificationService.sendPaymentConfirmation(payment);
-  res.json({ payment });
-}
+What did you actually prove? That the handler calls `userService.findById` with the right argument. That it passes the result to `paymentService.create`. That it calls `notificationService.send` afterward. You tested the *wiring* — not the *behaviour*.
 
-// The unit test — 15 lines of mocking for 3 lines of logic
-test('createPayment calls services correctly', () => {
-  const mockParse = jest.fn().mockReturnValue(validPayment);
-  const mockFindUser = jest.fn().mockResolvedValue(mockUser);
-  const mockCreate = jest.fn().mockResolvedValue(mockPayment);
-  const mockNotify = jest.fn().mockResolvedValue(undefined);
+Here's the deeper problem: **mocks encode assumptions about how dependencies behave.** Your mock returns a clean user object. But what if the real database returns `null` for a deleted user? Your mock returns a successful payment. But what if the real service throws a validation error for that currency? Every mock is a lie you're telling your test suite — a small one, usually, but lies compound.
 
-  // ...wire up all the mocks...
+Now imagine the integration test instead. You create a real user in the database, send a real HTTP request with real auth headers, and assert on the real response body and the real database state afterward. If you refactor the handler's internals — change the order of operations, extract a helper, switch from callbacks to async/await — the test stays green. It only breaks when the *actual behaviour* changes.
 
-  expect(mockFindUser).toHaveBeenCalledWith('user-123');
-  expect(mockCreate).toHaveBeenCalledWith(validPayment, mockUser);
-  expect(mockNotify).toHaveBeenCalledWith(mockPayment);
-});
-```
-
-This test verifies that the handler calls functions in the right order with the right arguments. It doesn't verify that the payment is actually created in the database. It doesn't verify that the validation actually rejects bad input. It doesn't verify that the notification actually sends. If you refactor the handler to use a different internal structure, the test breaks — even if the API response is identical.
-
-Now compare the integration test:
-
-```typescript
-test('POST /api/payments creates a payment', async () => {
-  const user = await factories.user.create({ plan: 'business' });
-  const recipient = await factories.recipient.create();
-
-  const response = await request(app)
-    .post('/api/payments')
-    .set('Authorization', `Bearer ${generateToken(user)}`)
-    .send({
-      amount: 25000,
-      currency: 'AUD',
-      recipientId: recipient.id,
-      description: 'Invoice #1234',
-    });
-
-  expect(response.status).toBe(200);
-  expect(response.body.payment).toMatchObject({
-    amount: 25000,
-    currency: 'AUD',
-    status: 'processing',
-  });
-
-  const dbPayment = await db.payment.findFirst({
-    where: { userId: user.id },
-  });
-  expect(dbPayment).toBeTruthy();
-  expect(dbPayment?.amount).toBe(25000);
-});
-```
-
-This tests the real thing. Real HTTP, real auth middleware, real validation, real database write. When this passes, you know the API works. Refactor the internals all you want — as long as the API contract holds, the test stays green.
-
-## Making Integration Tests Fast
-
-The common objection: "integration tests are slow." They don't have to be. Here are the patterns that keep ours under 5 minutes for 400+ tests.
-
-### Test containers for database
-
-We use Testcontainers to spin up a Postgres instance per test run. It starts in ~3 seconds, runs entirely in memory, and gets destroyed when tests finish.
-
-```typescript
-// test/setup.ts
-import { PostgreSqlContainer } from '@testcontainers/postgresql';
-
-let container: StartedPostgreSqlContainer;
-
-beforeAll(async () => {
-  container = await new PostgreSqlContainer('postgres:16-alpine')
-    .withDatabase('test')
-    .start();
-
-  process.env.DATABASE_URL = container.getConnectionUri();
-  await runMigrations();
-}, 30000);
-
-afterAll(async () => {
-  await container.stop();
-});
-```
-
-<Tip>
-Start the test container once for the entire suite, not per test file. A cold Postgres container start takes ~3 seconds. If you start one per file across 50 test files, that's 2.5 minutes of pure container overhead.
-</Tip>
-
-### Transaction rollback for isolation
-
-Instead of truncating tables between tests (slow) or using separate databases (complex), we wrap each test in a transaction and roll it back:
-
-```typescript
-// test/helpers.ts
-import { db } from '@/lib/db';
-
-beforeEach(async () => {
-  await db.$executeRaw`BEGIN`;
-});
-
-afterEach(async () => {
-  await db.$executeRaw`ROLLBACK`;
-});
-```
-
-Every test starts with a clean database state. The rollback is nearly instant compared to truncating and reseeding tables. At Weel, this pattern alone cut our test suite from 8 minutes to 3.5 minutes.
-
-### Factory functions over fixtures
-
-Static fixtures are brittle and hard to maintain. Factory functions create exactly the data each test needs:
-
-```typescript
-// test/factories/user.ts
-import { faker } from '@faker-js/faker';
-import { db } from '@/lib/db';
-
-export const userFactory = {
-  async create(overrides: Partial<CreateUserInput> = {}) {
-    return db.user.create({
-      data: {
-        email: faker.internet.email(),
-        name: faker.person.fullName(),
-        plan: 'starter',
-        ...overrides,
-      },
-    });
-  },
-
-  async createWithOrg(overrides: Partial<CreateUserInput> = {}) {
-    const org = await orgFactory.create();
-    return this.create({ ...overrides, orgId: org.id });
-  },
-};
-```
-
-Factories compose. Need a user with an organization, a payment method, and three past payments? Chain the factories. The test reads like a story, not a data dump.
-
-### Parallel execution
-
-Vitest runs test files in parallel by default. Since each test file uses transaction rollback for isolation, there's no interference between parallel runs:
-
-```typescript
-// vitest.config.ts
-export default defineConfig({
-  test: {
-    pool: 'forks',
-    poolOptions: {
-      forks: {
-        minForks: 2,
-        maxForks: 4,
-      },
-    },
-    setupFiles: ['./test/setup.ts'],
-  },
-});
-```
+| Approach | What It Proves | Fragility | Refactor Safety |
+|----------|---------------|-----------|-----------------|
+| Unit test with mocks | Handler calls dependencies in the right order | Breaks on any internal change | Low — coupled to implementation |
+| Integration test | The endpoint works end-to-end | Breaks only when behaviour changes | High — tests the contract |
 
 <Warning>
-Parallel tests sharing a database can cause flaky failures if tests depend on global state (sequences, unique constraints on generated data). Use factories with randomised data (faker) and transaction isolation to prevent this.
+If your test file has more lines of mock setup than actual assertions, that's a strong signal you're testing implementation details, not behaviour. Consider replacing those unit tests with a single integration test.
 </Warning>
 
 ## The Testing Diamond
 
-The traditional testing pyramid says: lots of unit tests, fewer integration tests, few E2E tests. For modern full-stack TypeScript applications, I use a diamond shape instead:
+The traditional testing pyramid says: lots of unit tests at the base, fewer integration tests, and a handful of E2E tests at the top. For modern full-stack TypeScript applications, I've found a diamond shape works far better.
 
-| Layer | Proportion | What It Tests |
-|-------|-----------|---------------|
-| E2E (Playwright) | 10% | Critical user journeys, 5-10 tests |
-| **Integration** | **60%** | **API endpoints, components with real data** |
-| Unit | 20% | Pure functions, utilities, calculations |
-| Static (TypeScript + ESLint) | 10% of effort | Types, patterns, formatting |
+| Layer | Proportion | What It Covers | Why This Ratio |
+|-------|-----------|----------------|----------------|
+| E2E (Playwright) | ~10% | 5–10 critical user journeys | Expensive to write and maintain — reserve for highest-value paths |
+| **Integration** | **~60%** | **API endpoints, components with real data, DB queries** | **Best confidence-to-cost ratio by far** |
+| Unit | ~20% | Pure functions, utilities, complex calculations | Cheap and fast, but limited confidence for app code |
+| Static (TypeScript + ESLint) | ~10% of effort | Types, patterns, formatting | Nearly free once configured — invest heavily |
 
-The diamond is widest at integration because that's where the confidence-to-cost ratio peaks. Integration tests cover real behaviour without the brittleness and slowness of full E2E tests, and without the false confidence of mocked unit tests.
+The diamond is widest at integration because that's where confidence peaks relative to effort. Integration tests cover real behaviour without the brittleness of full browser E2E, and without the false confidence of mocked unit tests.
+
+## Making Integration Tests Fast
+
+The most common objection to integration tests is speed. "They're too slow for CI." They don't have to be. Here are the patterns that keep suites fast.
+
+| Technique | What It Does | Impact |
+|-----------|-------------|--------|
+| **Test containers** | Spin up a Postgres instance per test run using Testcontainers. Starts in ~3 seconds, runs in memory, destroyed when done. | Eliminates external DB dependency; consistent across environments |
+| **Transaction rollback** | Wrap each test in a database transaction and rollback after. Nearly instant cleanup vs truncating tables. | Cuts suite time by 40–60% compared to table truncation |
+| **Factory functions** | Create test data programmatically with sensible defaults and overrides instead of static fixtures. | Tests are self-contained, readable, and won't break when the schema changes |
+| **Parallel execution** | Run test files in parallel (Vitest's default). Transaction isolation prevents interference between files. | Linear speedup proportional to available CPU cores |
+| **Selective mocking** | Only mock true external services (payment gateways, email providers). Never mock your own code. | Keeps tests realistic while avoiding network calls to third parties |
+
+<Tip>
+Start a single test container for the entire suite, not per file. A cold Postgres container takes ~3 seconds. Across 50 test files, that's 2.5 minutes of pure container overhead you can eliminate.
+</Tip>
 
 ## When Unit Tests DO Matter
 
-I'm not a unit test nihilist. There are clear cases where unit tests are the right tool:
+I'm not a unit test nihilist. There are clear cases where they're the right tool. The key is understanding the boundary.
 
-**Complex business logic.** A function that calculates tax across multiple jurisdictions with different rules, thresholds, and exemptions? Unit test every edge case. The logic is pure (input → output), and the combinatorial space is too large for integration tests alone.
+| Use Unit Tests When… | Use Integration Tests When… |
+|----------------------|----------------------------|
+| The function is **pure** (input → output, no side effects) | The code involves **I/O** — database, network, file system |
+| The logic has **many edge cases** that need exhaustive coverage | The value is in **components working together**, not in isolation |
+| You're testing an **algorithm** — sorting, parsing, rate limiting | You're testing an **API contract** — request in, response out |
+| The function is a **shared utility** used across the codebase | The code has **middleware, auth, or validation** in the chain |
+| **Speed matters** and the function can be tested in <1ms | The function's **real dependencies** are part of what you're verifying |
 
 ```typescript
-describe('calculateGST', () => {
-  it('applies standard 10% GST for domestic transactions', () => {
-    expect(calculateGST({ amount: 10000, country: 'AU', type: 'standard' }))
-      .toEqual({ net: 10000, gst: 1000, total: 11000 });
+// A perfect candidate for unit testing: pure, complex, many edge cases
+describe('calculateTax', () => {
+  it('applies 10% GST for domestic transactions', () => {
+    expect(calculateTax({ amount: 10000, country: 'AU' }))
+      .toEqual({ net: 10000, tax: 1000, total: 11000 });
   });
 
-  it('exempts GST for international transactions', () => {
-    expect(calculateGST({ amount: 10000, country: 'US', type: 'standard' }))
-      .toEqual({ net: 10000, gst: 0, total: 10000 });
-  });
-
-  it('applies reduced rate for eligible categories', () => {
-    expect(calculateGST({ amount: 10000, country: 'AU', type: 'education' }))
-      .toEqual({ net: 10000, gst: 0, total: 10000 });
+  it('exempts tax for international transactions', () => {
+    expect(calculateTax({ amount: 10000, country: 'US' }))
+      .toEqual({ net: 10000, tax: 0, total: 10000 });
   });
 });
 ```
 
-**Data transformations.** Functions that reshape data structures, parse formats, or transform between representations. Pure input/output, no side effects, lots of edge cases.
-
-**Algorithms.** Sorting, searching, scheduling, rate limiting logic — anything where correctness depends on specific algorithmic steps.
-
-The pattern: if it's a pure function with complex logic, unit test it. If it involves I/O, side effects, or system integration, integration test it.
+The pattern is simple: if it's pure logic with complex branches, unit test it. If it involves I/O, side effects, or system integration, write an integration test.
 
 ## Testing Error Paths
 
-The most valuable integration tests aren't the happy paths — they're the error paths. What happens when the database is down? When the payment provider returns a 500? When the request body is malformed?
+The most valuable integration tests aren't the happy paths — they're the error paths. What happens when the database is down? When the external API returns a 500? When the request body is malformed?
 
 ```typescript
 test('returns 422 for invalid payment amount', async () => {
   const user = await factories.user.create();
-
   const response = await request(app)
     .post('/api/payments')
     .set('Authorization', `Bearer ${generateToken(user)}`)
     .send({ amount: -100, currency: 'AUD' });
 
   expect(response.status).toBe(422);
-  expect(response.body.errors).toContainEqual(
-    expect.objectContaining({
-      field: 'amount',
-      message: expect.stringContaining('positive'),
-    })
-  );
-});
-
-test('returns 503 when payment provider is unavailable', async () => {
-  mockPaymentProvider.simulateOutage();
-  const user = await factories.user.create();
-
-  const response = await request(app)
-    .post('/api/payments')
-    .set('Authorization', `Bearer ${generateToken(user)}`)
-    .send(validPaymentData);
-
-  expect(response.status).toBe(503);
-  expect(response.body.error).toBe('Payment service temporarily unavailable');
+  expect(response.body.errors[0].field).toBe('amount');
 });
 ```
 
 <Info>
-At Weel, we require every API endpoint to have at least one error path integration test. The pattern is: "what happens when [dependency] fails?" These tests have caught more production bugs than all our unit tests combined, because error handling code is the code that gets the least manual testing.
+I've seen teams require every API endpoint to have at least one error path integration test. The question to ask: "What happens when this dependency fails?" Error handling code gets the least manual testing, which makes it the most valuable code to automate tests for.
 </Info>
 
-The testing philosophy is simple: test the things users and systems interact with. HTTP endpoints. Rendered components. Published events. Database state. Everything else is an implementation detail that you should be free to refactor without breaking tests.
+The testing philosophy is straightforward: test the things users and systems interact with. HTTP endpoints. Rendered components. Published events. Database state. Everything else is an implementation detail you should be free to refactor without fear.
